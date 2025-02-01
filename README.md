@@ -1,7 +1,7 @@
 # Snap Safe
 
 **Snap Safe** is a command-line tool written in Rust for creating efficient snapshots of directories.  
-It is designed to help manage build artifacts, large binaries, and backups by leveraging filesystem-level operations—using hard links to avoid duplicating unchanged files.
+It is designed to help manage build artifacts, large binaries, and backups by leveraging filesystem level operations. Using hard links to avoid duplicating unchanged files.
 
 ## Features
 
