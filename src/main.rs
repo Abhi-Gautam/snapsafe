@@ -1,4 +1,8 @@
 use clap::{Parser, Subcommand};
+use std::process;
+
+mod repository;
+use repository::{init_repository, create_snapshot};
 
 /// Snap Safe: A CLI tool for efficient snapshots
 #[derive(Parser)]
@@ -51,17 +55,19 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
+
     match &cli.command {
         Commands::Init {directory} => {
-            println!("Initializing Snap Safe in directory: {}", directory);
-            // TODO: Implement repository initialization logic here.
+            if let Err(e) = init_repository(directory) {
+                eprintln!("Error initializing repository: {}", e);
+                process::exit(1);
+            }
         },
         Commands::Snapshot { message } => {
-            println!("Creating new snapshot.");
-            if let Some(msg) = message {
-                println!("Snapshot message: {}", msg);
+            if let Err(e) = create_snapshot(message.clone()) {
+                eprintln!("Error creating snapshot: {}", e);
+                process::exit(1);
             }
-            // TODO: Implement snapshot creation logic here.
         },
         Commands::List => {
             println!("Listing all snapshots.");
