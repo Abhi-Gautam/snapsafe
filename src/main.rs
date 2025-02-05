@@ -16,15 +16,14 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Initializes Snap Safe in the specifier directory.
-    Init {
-        /// Directory where Snap Safe should be initialized
-        #[arg(default_value = ".")]
-        directory: String,
-    },
+    Init,
 
     /// Create a new snapshot
     Snapshot {
-        /// Optional message for the snapshot
+        /// Optional tag for the snapshot.
+        #[arg(short, long)]
+        tag: Option<String>,
+        /// Optional message describing the snapshot.
         #[arg(short, long)]
         message: Option<String>,
     },
@@ -57,14 +56,14 @@ fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Init {directory} => {
-            if let Err(e) = init_repository(directory) {
+        Commands::Init => {
+            if let Err(e) = init_repository() {
                 eprintln!("Error initializing repository: {}", e);
                 process::exit(1);
             }
         },
-        Commands::Snapshot { message } => {
-            if let Err(e) = create_snapshot(message.clone()) {
+        Commands::Snapshot { tag, message } => {
+            if let Err(e) = create_snapshot(message.clone(), tag.clone()) {
                 eprintln!("Error creating snapshot: {}", e);
                 process::exit(1);
             }

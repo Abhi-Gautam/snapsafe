@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
@@ -6,12 +7,12 @@ use serde::{Serialize, Deserialize};
 
 pub const REPO_FOLDER: &str = ".snapsafe";
 pub const SNAPSHOTS_FOLDER: &str = "snapshots";
-pub const CONFIG_FILE: &str = "base_path.txt";
+pub const HEAD_MANIFEST_FILE: &str = "head_manifest.json";
 pub const MANIFEST_FILE: &str = "manifest.json";
 pub const IGNORE_FILE: &str = ".snapsafeignore";
 
 /// Structure to hold metadata for a single file.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FileMetadata {
     /// The file's path relative to the base directory.
     pub relative_path: String,
@@ -21,8 +22,24 @@ pub struct FileMetadata {
     pub modified: String,
 }
 
-/// Read the ignore list from the .snapsafeignore file in the base directory.
-/// Each non-empty, non-comment line is treated as an ignore pattern (literal file or directory name).
+/// Structure to represent a snapshot entry in the head manifest.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SnapshotIndex {
+    /// The version string (e.g., "v1.0.0.0" or "vrelease" if provided).
+    pub version: String,
+    /// The snapshot creation timestamp (as a string).
+    pub timestamp: String,
+    /// An optional message provided by the user.
+    pub message: Option<String>,
+}
+
+/// Returns the base directory (current working directory).
+pub fn get_base_dir() -> io::Result<PathBuf> {
+    std::env::current_dir()
+}
+
+/// Reads the ignore list from the .snapsafeignore file in the base directory.
+/// Each non-empty, non-comment line is treated as a literal file or directory name to ignore.
 pub fn read_ignore_list(base: &Path) -> io::Result<Vec<String>> {
     let ignore_path = base.join(IGNORE_FILE);
     let mut ignore_list = Vec::new();
@@ -38,18 +55,17 @@ pub fn read_ignore_list(base: &Path) -> io::Result<Vec<String>> {
             }
         }
     }
-    println!("DEBUG: Ignore list: {:?}", ignore_list);
     Ok(ignore_list)
 }
 
-/// Initialize the Snap Safe repository in the given base directory.
-///
-/// This creates a hidden folder `.snapsafe` and a subfolder `snapshots` inside it.
-pub fn init_repository(base_dir: &str) -> io::Result<()> {
-    let base_path = Path::new(base_dir);
+/// Initializes the Snap Safe repository in the current directory.
+/// This creates the hidden `.snapsafe` folder (and its subfolder for snapshots)
+/// and initializes an empty head manifest.
+pub fn init_repository() -> io::Result<()> {
+    let base_path = std::env::current_dir()?;
+
     let repo_path = base_path.join(REPO_FOLDER);
     let snapshots_path = repo_path.join(SNAPSHOTS_FOLDER);
-    let config_path = repo_path.join(CONFIG_FILE);
 
     if repo_path.exists() {
         println!("Repository already exists at {:?}", repo_path);
@@ -65,150 +81,236 @@ pub fn init_repository(base_dir: &str) -> io::Result<()> {
         println!("Created snapshots directory at {:?}", snapshots_path);
     }
 
-    // Write the canonical base path into the config file.
-    let canonical_base = fs::canonicalize(base_path)?;
-    fs::write(&config_path, canonical_base.to_string_lossy().to_string())?;
-    println!("Base path set to: {:?}", canonical_base);
-
+    // Initialize an empty head manifest if it does not exist.
+    let head_manifest_path = repo_path.join(HEAD_MANIFEST_FILE);
+    if !head_manifest_path.exists() {
+        let empty: Vec<SnapshotIndex> = Vec::new();
+        let manifest_json = serde_json::to_string_pretty(&empty)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        fs::write(&head_manifest_path, manifest_json)?;
+        println!("Initialized head manifest at {:?}", head_manifest_path);
+    } else {
+        println!("Head manifest already exists at {:?}", head_manifest_path);
+    }
     Ok(())
 }
 
-/// Search upward from the starting directory for a directory that contains the repository folder.
-///
-/// Returns the directory in which the repository (i.e. `.snapsafe`) is found.
-pub fn find_repository_dir(start_dir: &Path) -> io::Result<PathBuf> {
-    let mut current = start_dir;
-    loop {
-        let repo_path = current.join(REPO_FOLDER);
-        if repo_path.exists() {
-            return Ok(current.to_path_buf());
-        }
-        match current.parent() {
-            Some(parent) => current = parent,
-            None => break,
-        }
-    }
-    Err(io::Error::new(
-        io::ErrorKind::NotFound,
-        "Repository not found in current or parent directories",
-    ))
-}
-
-/// Read the stored base directory from the repository config.
-/// If not found, default to the canonical version of the given current_dir.
-pub fn get_configured_base_dir(start_dir: &Path) -> io::Result<PathBuf> {
-    let repo_base = find_repository_dir(start_dir)?;
-    let repo_path = repo_base.join(REPO_FOLDER);
-    let config_path = repo_path.join(CONFIG_FILE);
-    if config_path.exists() {
-        let content = fs::read_to_string(&config_path)?;
-        Ok(PathBuf::from(content.trim()))
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Repository not initialized. Please run the init command first.",
-        ))
-    }
-}
-
-/// Create a new snapshot of the base directory.
-///
-/// This function creates a new folder inside `.snapsafe/snapshots` with a timestamp as its name,
-/// and recursively copies all files and directories from the base directory into it,
-/// skipping the `.snapsafe` directory.
-pub fn create_snapshot(message: Option<String>) -> io::Result<()> {
-    let current_dir = std::env::current_dir()?;
-    let base_path = get_configured_base_dir(&current_dir)?;
-    let repo_path = base_path.join(REPO_FOLDER);
-    let snapshots_path = repo_path.join(SNAPSHOTS_FOLDER);
+/// Creates a new snapshot using the current directory as the base.
+/// The new snapshot folder name is determined by the versioning scheme (using an optional tag
+/// or auto-incrementing from the last snapshot). Files are processed recursively;
+/// if a file is unchanged compared to the previous snapshot (by size and modification time),
+/// a hard link is created instead of copying. Detailed file metadata is collected and written
+/// to a manifest file in the snapshot folder. The head manifest is updated with the new snapshot entry.
+pub fn create_snapshot(message: Option<String>, tag: Option<String>) -> io::Result<()> {
+    let base_path = get_base_dir()?;
     let ignore_list = read_ignore_list(&base_path)?;
 
-    // Ensure repository exists
+    let repo_path = base_path.join(REPO_FOLDER);
+    let snapshots_path = repo_path.join(SNAPSHOTS_FOLDER);
+
     if !repo_path.exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "Repository not initialized. Please run 'init' command first."));
+        return Err(io::Error::new(io::ErrorKind::NotFound, "Repository not initialized. Please run the init command first."));
     }
 
-    // Generate snapshot id using current timestamp
-    let timestamp = Local::now().format("%Y%m%d%H%M%S").to_string();
-    let snapshot_dir = snapshots_path.join(&timestamp);
+    // Load head manifest.
+    let mut head_manifest = load_head_manifest(&base_path)?;
+    // Determine new version string.
+    let new_version = get_next_version(&head_manifest, tag);
 
-    // Create snapshot directory
+    // New snapshot folder is named by the version.
+    let snapshot_dir = snapshots_path.join(&new_version);
     fs::create_dir(&snapshot_dir)?;
-    println!("Created snapshot directory: {:?}", snapshot_dir);
 
-    // Optionally store the message (for now, just print it)
-    if let Some(msg) = message {
+    if let Some(ref msg) = message {
         println!("Snapshot message: {}", msg);
-        // Future work: Save the message in metadata.
     }
 
-    // Prepare a vector to collect metadata for each file.
+    // Load previous snapshot manifest (if any) using the head manifest.
+    let prev_snapshot = load_prev_snapshot_manifest(&base_path, &head_manifest)?;
+
+    // Prepare vector to collect detailed file metadata.
     let mut metadata_vec: Vec<FileMetadata> = Vec::new();
+    copy_or_link_recursive_with_metadata(
+        &base_path,
+        &snapshot_dir,
+        REPO_FOLDER,
+        &base_path,
+        &ignore_list,
+        &prev_snapshot,
+        &mut metadata_vec,
+    )?;
 
-    // Copy files from base directory to snapshot directory, skipping the repository folder
-    copy_dir_recursive(&base_path, &snapshot_dir, REPO_FOLDER, &base_path, &ignore_list, &mut metadata_vec)?;
-
+    // Write the detailed manifest into the snapshot folder.
     let manifest_path = snapshot_dir.join(MANIFEST_FILE);
     let manifest_json = serde_json::to_string_pretty(&metadata_vec)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     fs::write(&manifest_path, manifest_json)?;
 
-    println!("Snapshot created successfully.");
+    // Create a new snapshot index entry.
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let new_snapshot_index = SnapshotIndex {
+        version: new_version.clone(),
+        timestamp,
+        message,
+    };
 
+    // Update the head manifest.
+    head_manifest.push(new_snapshot_index);
+    save_head_manifest(&base_path, &head_manifest)?;
+
+    println!("Snapshot created successfully.");
     Ok(())
 }
 
-/// Recursively copy contents from src to dst.
-///
-/// The `skip_dir` parameter specifies a directory name to skip (for example, the repository folder).
-fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf, skip_dir: &str, base: &Path, ignore_list: &Vec<String>, metadata: &mut Vec<FileMetadata>,) -> io::Result<()> {
+/// Loads the head manifest from `.snapsafe/head_manifest.json`.
+fn load_head_manifest(base_path: &Path) -> io::Result<Vec<SnapshotIndex>> {
+    let head_manifest_path = base_path.join(REPO_FOLDER).join(HEAD_MANIFEST_FILE);
+    if head_manifest_path.exists() {
+        let content = fs::read_to_string(&head_manifest_path)?;
+        let indices: Vec<SnapshotIndex> = serde_json::from_str(&content)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        Ok(indices)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Saves the head manifest to `.snapsafe/head_manifest.json`.
+fn save_head_manifest(base_path: &Path, indices: &[SnapshotIndex]) -> io::Result<()> {
+    let head_manifest_path = base_path.join(REPO_FOLDER).join(HEAD_MANIFEST_FILE);
+    let json = serde_json::to_string_pretty(&indices)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    fs::write(&head_manifest_path, json)?;
+    Ok(())
+}
+
+/// Given the current head manifest and an optional user-provided tag,
+/// returns the next snapshot version string.
+/// - If a tag is provided, uses that (prefixed with "v" if needed).
+/// - Otherwise, if no snapshots exist, returns "v1.0.0.0".
+/// - Otherwise, increments the build number (the last component) of the last snapshot version.
+fn get_next_version(head: &Vec<SnapshotIndex>, tag: Option<String>) -> String {
+    if let Some(user_tag) = tag {
+        if user_tag.starts_with('v') {
+            user_tag
+        } else {
+            format!("v{}", user_tag)
+        }
+    } else {
+        if head.is_empty() {
+            "v1.0.0.0".to_string()
+        } else {
+            let last_version = &head.last().unwrap().version;
+            // Assume the version is in the format vX.Y.Z.B
+            let numeric_part = last_version.trim_start_matches('v');
+            let parts: Vec<&str> = numeric_part.split('.').collect();
+            if parts.len() != 4 {
+                // Fallback if not in expected format
+                "v1.0.0.0".to_string()
+            } else {
+                let major = parts[0];
+                let minor = parts[1];
+                let patch = parts[2];
+                let build: u32 = parts[3].parse().unwrap_or(0);
+                let new_build = build + 1;
+                format!("v{}.{}.{}.{}", major, minor, patch, new_build)
+            }
+        }
+    }
+}
+
+/// Loads the previous snapshot's detailed manifest (if any) from the head manifest.
+/// Returns an Option with a tuple containing the snapshot folder path and a HashMap
+/// mapping each file's relative path to its FileMetadata.
+fn load_prev_snapshot_manifest(base_path: &Path, head: &Vec<SnapshotIndex>) -> io::Result<Option<(PathBuf, HashMap<String, FileMetadata>)>> {
+    if head.is_empty() {
+        return Ok(None);
+    }
+    let last_entry = head.last().unwrap();
+    let snapshot_folder = base_path.join(REPO_FOLDER).join(SNAPSHOTS_FOLDER).join(&last_entry.version);
+    let manifest_path = snapshot_folder.join(MANIFEST_FILE);
+    if manifest_path.exists() {
+        let manifest_content = fs::read_to_string(&manifest_path)?;
+        let metadata_vec: Vec<FileMetadata> = serde_json::from_str(&manifest_content)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut metadata_map = HashMap::new();
+        for meta in metadata_vec {
+            metadata_map.insert(meta.relative_path.clone(), meta);
+        }
+        Ok(Some((snapshot_folder, metadata_map)))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Recursively processes files and directories from src to dst, skipping entries that match skip_dir
+/// or appear in ignore_list. For each file, if a previous snapshot exists and the file is unchanged
+/// (based on size and modification time), an attempt is made to create a hard link from the previous
+/// snapshot's file; otherwise, the file is copied. Collected file metadata is appended to the metadata vector.
+fn copy_or_link_recursive_with_metadata(
+    src: &Path,
+    dst: &Path,
+    skip_dir: &str,
+    base: &Path,
+    ignore_list: &Vec<String>,
+    prev_snapshot: &Option<(PathBuf, HashMap<String, FileMetadata>)>,
+    metadata: &mut Vec<FileMetadata>,
+) -> io::Result<()> {
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let path = entry.path();
         let file_name = entry.file_name();
         let file_name_str = file_name.to_string_lossy();
 
-        // Skip the directory we don't want to copy (like .snapsafe)
+        // Skip the repository folder and entries in the ignore list.
         if file_name_str == skip_dir {
             continue;
         }
-
         if ignore_list.contains(&file_name_str.to_string()) {
-            println!("DEBUG: Ignoring {} as per .snapsafeignore", file_name_str);
             continue;
         }
 
         let dest_path = dst.join(&file_name);
 
         if path.is_dir() {
-            // Create the directory in the destination and recurse
             fs::create_dir_all(&dest_path)?;
-            copy_dir_recursive(&path, &dest_path, skip_dir, base, ignore_list, metadata)?;
+            copy_or_link_recursive_with_metadata(&path, &dest_path, skip_dir, base, ignore_list, prev_snapshot, metadata)?;
         } else if path.is_file() {
-            // Copy the file
-            fs::copy(&path, &dest_path)?;
-            // Retrieve file metadata.
             let meta = fs::metadata(&path)?;
             let file_size = meta.len();
-
-            // Get modification time as a formatted string.
             let modified_time: DateTime<Local> = meta.modified()
                 .map(DateTime::<Local>::from)
                 .unwrap_or_else(|_| Local::now());
             let modified_str = modified_time.format("%Y-%m-%d %H:%M:%S").to_string();
-
-            // Compute the relative path (relative to the base directory).
             let relative_path = path.strip_prefix(base)
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .to_string();
 
-            // Create the FileMetadata entry.
             let file_meta = FileMetadata {
-                relative_path,
+                relative_path: relative_path.clone(),
                 file_size,
-                modified: modified_str,
+                modified: modified_str.clone(),
             };
+
+            let mut used_hard_link = false;
+            if let Some((prev_snapshot_dir, prev_manifest)) = prev_snapshot {
+                if let Some(prev_meta) = prev_manifest.get(&relative_path) {
+                    if prev_meta.file_size == file_size && prev_meta.modified == modified_str {
+                        let prev_file_path = prev_snapshot_dir.join(&relative_path);
+                        match fs::hard_link(&prev_file_path, &dest_path) {
+                            Ok(_) => {
+                                used_hard_link = true;
+                            },
+                            Err(_) => {
+                            }
+                        }
+                    }
+                }
+            }
+            if !used_hard_link {
+                fs::copy(&path, &dest_path)?;
+            }
             metadata.push(file_meta);
         }
     }
