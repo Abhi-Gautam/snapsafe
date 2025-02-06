@@ -1,13 +1,12 @@
 use std::{fs, io};
 
-use crate::{constants::{HEAD_MANIFEST_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER}, manifest};
+use crate::{constants::{REPO_FOLDER, SNAPSHOTS_FOLDER}, info, manifest};
 
 /// Initializes the Snap Safe repository in the current directory.
 /// This creates the hidden `.snapsafe` folder (and its subfolder for snapshots)
 /// and initializes an empty head manifest.
 pub fn init_repository() -> io::Result<()> {
-    let base_path = std::env::current_dir()?;
-
+    let base_path = info::get_base_dir()?;
     let repo_path = base_path.join(REPO_FOLDER);
     let snapshots_path = repo_path.join(SNAPSHOTS_FOLDER);
 
@@ -24,9 +23,6 @@ pub fn init_repository() -> io::Result<()> {
         fs::create_dir(&snapshots_path)?;
         println!("Created snapshots directory at {:?}", snapshots_path);
     }
-
-    // Initialize an empty head manifest if it does not exist.
-    let head_manifest_path = repo_path.join(HEAD_MANIFEST_FILE);
-    manifest::initialize_head_manifest(&head_manifest_path)?;
+    manifest::initialize_head_manifest(&base_path)?;
     Ok(())
 }

@@ -2,7 +2,8 @@ use std::{collections::HashMap, fs, io, path::{Path, PathBuf}};
 
 use crate::{constants::{HEAD_MANIFEST_FILE, MANIFEST_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER}, models::{FileMetadata, SnapshotIndex}};
 
-pub fn initialize_head_manifest(head_manifest_path: &Path) -> io::Result<()> {
+pub fn initialize_head_manifest(base_path: &Path) -> io::Result<()> {
+    let head_manifest_path = base_path.join(REPO_FOLDER).join(HEAD_MANIFEST_FILE);
     if !head_manifest_path.exists() {
         let empty: Vec<SnapshotIndex> = Vec::new();
         let manifest_json = serde_json::to_string_pretty(&empty)
