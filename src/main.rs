@@ -4,10 +4,7 @@ mod models;
 mod info;
 mod manifest;
 mod constants;
-mod init;
-mod snapshot;
-mod list;
-mod diff;
+mod subcommands;
 
 /// Snap Safe: A CLI tool for efficient snapshots
 #[derive(Parser)]
@@ -62,25 +59,25 @@ fn main() {
 
     match &cli.command {
         Commands::Init => {
-            if let Err(e) = init::init_repository() {
+            if let Err(e) = subcommands::init::init_repository() {
                 eprintln!("Error initializing repository: {}", e);
                 process::exit(1);
             }
         },
         Commands::Snapshot { tag, message } => {
-            if let Err(e) = snapshot::create_snapshot(message.clone(), tag.clone()) {
+            if let Err(e) = subcommands::snapshot::create_snapshot(message.clone(), tag.clone()) {
                 eprintln!("Error creating snapshot: {}", e);
                 process::exit(1);
             }
         },
         Commands::List => {
-            if let Err(e) = list::list_snapshots() {
+            if let Err(e) = subcommands::list::list_snapshots() {
                 eprintln!("Error listing snapshots: {}", e);
                 process::exit(1);
             }
         },
         Commands::Diff { snapshot1, snapshot2 } => {
-            if let Err(e) = diff::diff_snapshots(snapshot1.clone(), snapshot2.clone()) {
+            if let Err(e) = subcommands::diff::diff_snapshots(snapshot1.clone(), snapshot2.clone()) {
                 eprintln!("Error diffing snapshots: {}", e);
                 process::exit(1);
             }
