@@ -6,6 +6,8 @@ mod manifest;
 mod constants;
 mod init;
 mod snapshot;
+mod list;
+mod diff;
 
 /// Snap Safe: A CLI tool for efficient snapshots
 #[derive(Parser)]
@@ -37,7 +39,7 @@ enum Commands {
         /// First snapshot ID
         snapshot1: String,
         /// Second snapshot ID
-        snapshot2: String,
+        snapshot2: Option<String>,
     },
     /// Restore a snapshot
     Restore {
@@ -72,12 +74,16 @@ fn main() {
             }
         },
         Commands::List => {
-            println!("Listing all snapshots.");
-            // TODO: Implement logic to list snapshots.
+            if let Err(e) = list::list_snapshots() {
+                eprintln!("Error listing snapshots: {}", e);
+                process::exit(1);
+            }
         },
         Commands::Diff { snapshot1, snapshot2 } => {
-            println!("Diffing snapshot '{}' with snapshot '{}'.", snapshot1, snapshot2);
-            // TODO: Implement diff logic between snapshots.
+            if let Err(e) = diff::diff_snapshots(snapshot1.clone(), snapshot2.clone()) {
+                eprintln!("Error diffing snapshots: {}", e);
+                process::exit(1);
+            }
         },
         Commands::Restore { snapshot_id } => {
             println!("Restoring snapshot: {}", snapshot_id);

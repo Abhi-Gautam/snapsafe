@@ -3,10 +3,41 @@ use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 use chrono::{Local, DateTime};
-use crate::constants::{IGNORE_FILE, MANIFEST_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER};
+use crate::constants::{HEAD_MANIFEST_FILE, IGNORE_FILE, MANIFEST_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER};
 use crate::models::{SnapshotIndex, FileMetadata};
 use crate::info;
 use crate::manifest;
+
+
+
+/// Initializes the Snap Safe repository in the current directory.
+/// This creates the hidden `.snapsafe` folder (and its subfolder for snapshots)
+/// and initializes an empty head manifest.
+pub fn init_repository() -> io::Result<()> {
+    let base_path = std::env::current_dir()?;
+
+    let repo_path = base_path.join(REPO_FOLDER);
+    let snapshots_path = repo_path.join(SNAPSHOTS_FOLDER);
+
+    if repo_path.exists() {
+        println!("Repository already exists at {:?}", repo_path);
+    } else {
+        fs::create_dir(&repo_path)?;
+        println!("Created repository directory at {:?}", repo_path);
+    }
+
+    if snapshots_path.exists() {
+        println!("Snapshots directory already exists at {:?}", snapshots_path);
+    } else {
+        fs::create_dir(&snapshots_path)?;
+        println!("Created snapshots directory at {:?}", snapshots_path);
+    }
+
+    // Initialize an empty head manifest if it does not exist.
+    let head_manifest_path = repo_path.join(HEAD_MANIFEST_FILE);
+    manifest::initialize_head_manifest(&head_manifest_path)?;
+    Ok(())
+}
 
 /// Creates a new snapshot using the current directory as the base.
 /// The new snapshot folder name is determined by the versioning scheme (using an optional tag
@@ -37,8 +68,6 @@ pub fn create_snapshot(message: Option<String>, tag: Option<String>) -> io::Resu
     if let Some(ref msg) = message {
         println!("Snapshot message: {}", msg);
     }
-
-
 
     // Load previous snapshot manifest (if any) using the head manifest.
     let prev_snapshot = manifest::load_last_snapshot_manifest(&base_path, &head_manifest)?;
@@ -75,27 +104,6 @@ pub fn create_snapshot(message: Option<String>, tag: Option<String>) -> io::Resu
 
     println!("Snapshot created successfully.");
     Ok(())
-}
-
-
-/// Reads the ignore list from the .snapsafeignore file in the base directory.
-/// Each non-empty, non-comment line is treated as a literal file or directory name to ignore.
-fn read_ignore_list(base: &Path) -> io::Result<Vec<String>> {
-    let ignore_path = base.join(IGNORE_FILE);
-    let mut ignore_list = Vec::new();
-
-    if ignore_path.exists() {
-        let file = fs::File::open(ignore_path)?;
-        let reader = io::BufReader::new(file);
-        for line_result in reader.lines() {
-            let line = line_result?;
-            let trimmed = line.trim();
-            if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                ignore_list.push(trimmed.to_string());
-            }
-        }
-    }
-    Ok(ignore_list)
 }
 
 /// Recursively processes files and directories from src to dst, skipping entries that match skip_dir
