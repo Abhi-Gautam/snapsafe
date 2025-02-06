@@ -1,8 +1,11 @@
 use clap::{Parser, Subcommand};
 use std::process;
-
-mod repository;
-use repository::{init_repository, create_snapshot};
+mod models;
+mod info;
+mod manifest;
+mod constants;
+mod init;
+mod snapshot;
 
 /// Snap Safe: A CLI tool for efficient snapshots
 #[derive(Parser)]
@@ -57,13 +60,13 @@ fn main() {
 
     match &cli.command {
         Commands::Init => {
-            if let Err(e) = init_repository() {
+            if let Err(e) = init::init_repository() {
                 eprintln!("Error initializing repository: {}", e);
                 process::exit(1);
             }
         },
         Commands::Snapshot { tag, message } => {
-            if let Err(e) = create_snapshot(message.clone(), tag.clone()) {
+            if let Err(e) = snapshot::create_snapshot(message.clone(), tag.clone()) {
                 eprintln!("Error creating snapshot: {}", e);
                 process::exit(1);
             }
