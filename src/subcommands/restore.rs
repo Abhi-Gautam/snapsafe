@@ -54,7 +54,7 @@ pub fn restore_snapshot(snapshot_id: Option<String>, backup: bool) -> io::Result
         println!("Creating backup snapshot before restoring...");
         if let Err(e) = snapshot::create_snapshot(
             Some("Auto-backup before restore".to_string()), 
-            Some("pre-restore-backup".to_string())
+            None
         ) {
             return Err(io::Error::new(
                 ErrorKind::Other, 

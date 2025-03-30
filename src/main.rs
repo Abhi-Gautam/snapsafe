@@ -42,6 +42,8 @@ enum Commands {
     Restore {
         /// Snapshot ID to restore
         snapshot_id: Option<String>,
+        /// Skip creating a backup before restoring
+        #[arg(long, action = clap::ArgAction::SetTrue)]
         no_backup: bool,
     },
 }
