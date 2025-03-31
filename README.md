@@ -43,6 +43,9 @@ cargo build --release
 ```bash
 cargo install snapsafe
 ```
+### Download Binaries
+
+Pre-built binaries are available for download from the [GitHub releases page](https://github.com/Abhi-Gautam/snapsafe/releases). Download and add them to your path.
 
 ## 🚀 Quick Start
 
