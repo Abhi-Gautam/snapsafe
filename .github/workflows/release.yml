@@ -55,8 +55,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v3
+        with:
+          path: artifacts
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: snapsafe-*/snapsafe*
+          files: artifacts/snapsafe-*/snapsafe*
           generate_release_notes: true
