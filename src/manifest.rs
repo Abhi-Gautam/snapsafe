@@ -1,6 +1,13 @@
-use std::{collections::HashMap, fs, io, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    fs, io,
+    path::{Path, PathBuf},
+};
 
-use crate::{constants::{HEAD_MANIFEST_FILE, MANIFEST_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER}, models::{FileMetadata, SnapshotIndex}};
+use crate::{
+    constants::{HEAD_MANIFEST_FILE, MANIFEST_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER},
+    models::{FileMetadata, SnapshotIndex},
+};
 
 pub fn initialize_head_manifest(base_path: &Path) -> io::Result<()> {
     let head_manifest_path = base_path.join(REPO_FOLDER).join(HEAD_MANIFEST_FILE);
@@ -21,8 +28,8 @@ pub fn load_head_manifest(base_path: &Path) -> io::Result<Vec<SnapshotIndex>> {
     let head_manifest_path = base_path.join(REPO_FOLDER).join(HEAD_MANIFEST_FILE);
     if head_manifest_path.exists() {
         let content = fs::read_to_string(&head_manifest_path)?;
-        let indices: Vec<SnapshotIndex> = serde_json::from_str(&content)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let indices: Vec<SnapshotIndex> =
+            serde_json::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         Ok(indices)
     } else {
         Ok(Vec::new())
@@ -41,8 +48,14 @@ pub fn save_head_manifest(base_path: &Path, indices: &[SnapshotIndex]) -> io::Re
 /// Loads the detailed manifest for the given snapshot version from its snapshot folder.
 /// Returns an Option with a tuple containing the snapshot folder path and a HashMap
 /// mapping each file's relative path to its FileMetadata.
-pub fn load_snapshot_manifest(base_path: &Path, version: &str) -> io::Result<Option<(PathBuf, HashMap<String, FileMetadata>)>> {
-    let snapshot_folder = base_path.join(REPO_FOLDER).join(SNAPSHOTS_FOLDER).join(version);
+pub fn load_snapshot_manifest(
+    base_path: &Path,
+    version: &str,
+) -> io::Result<Option<(PathBuf, HashMap<String, FileMetadata>)>> {
+    let snapshot_folder = base_path
+        .join(REPO_FOLDER)
+        .join(SNAPSHOTS_FOLDER)
+        .join(version);
     let manifest_path = snapshot_folder.join(MANIFEST_FILE);
     if manifest_path.exists() {
         let manifest_content = fs::read_to_string(&manifest_path)?;
@@ -61,7 +74,10 @@ pub fn load_snapshot_manifest(base_path: &Path, version: &str) -> io::Result<Opt
 /// Loads the previous snapshot's detailed manifest (if any) from the head manifest.
 /// Returns an Option with a tuple containing the snapshot folder path and a HashMap
 /// mapping each file's relative path to its FileMetadata.
-pub fn load_last_snapshot_manifest(base_path: &Path, head: &[SnapshotIndex]) -> io::Result<Option<(PathBuf, HashMap<String, FileMetadata>)>> {
+pub fn load_last_snapshot_manifest(
+    base_path: &Path,
+    head: &[SnapshotIndex],
+) -> io::Result<Option<(PathBuf, HashMap<String, FileMetadata>)>> {
     if head.is_empty() {
         return Ok(None);
     }

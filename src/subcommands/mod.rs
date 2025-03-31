@@ -1,10 +1,10 @@
-pub mod snapshot;
-pub mod list;
-pub mod init;
 pub mod diff;
-pub mod restore;
-pub mod prune;
-pub mod verify;
 pub mod info;
-pub mod tag;
+pub mod init;
+pub mod list;
 pub mod meta;
+pub mod prune;
+pub mod restore;
+pub mod snapshot;
+pub mod tag;
+pub mod verify;

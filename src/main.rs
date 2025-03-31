@@ -1,22 +1,22 @@
 //! # Snap Safe
-//! 
-//! Snap Safe is a lightning-fast, lightweight command-line tool for creating 
+//!
+//! Snap Safe is a lightning-fast, lightweight command-line tool for creating
 //! efficient directory snapshots. It leverages hard links to provide space-efficient
 //! backups with minimal overhead.
-//! 
+//!
 //! ## Features
-//! 
+//!
 //! - **Efficient Incremental Snapshots**: Uses hard links to avoid duplicating unchanged files
 //! - **Blazing Fast Performance**: Written in Rust for maximum speed and minimal resource consumption
 //! - **Metadata Management**: Attach custom metadata to snapshots, including tags and key-value properties
-//! 
+//!
 
 use clap::{Parser, Subcommand};
 use std::process;
-mod models;
+mod constants;
 mod info;
 mod manifest;
-mod constants;
+mod models;
 mod subcommands;
 
 #[derive(Parser)]
@@ -31,7 +31,7 @@ struct Cli {
 enum Commands {
     /// Initializes a new Snap Safe repository in the current directory
     ///
-    /// This command creates a hidden .snapsafe directory structure to store 
+    /// This command creates a hidden .snapsafe directory structure to store
     /// snapshots and metadata. It's the first command you should run before
     /// using other Snap Safe features.
     ///
@@ -41,7 +41,7 @@ enum Commands {
     /// Create a new snapshot of the current directory state
     ///
     /// Creates a space-efficient snapshot by hard-linking unchanged files from previous
-    /// snapshots and only copying modified files. Snapshots can be annotated with 
+    /// snapshots and only copying modified files. Snapshots can be annotated with
     /// messages, tags, and custom metadata.
     ///
     /// Examples:
@@ -96,7 +96,7 @@ enum Commands {
         /// Snapshot ID to restore (version, prefix, or "latest")
         /// If not provided, restores the latest snapshot
         snapshot_id: Option<String>,
-        
+
         /// Skip creating a backup snapshot before restoring
         /// Note: Without a backup, you can't easily undo the restoration
         #[arg(long, action = clap::ArgAction::SetTrue)]
@@ -116,12 +116,12 @@ enum Commands {
         /// Keep only the N most recent snapshots and remove older ones
         #[arg(long)]
         keep_last: Option<usize>,
-        
+
         /// Remove snapshots older than the specified duration
         /// Supports formats: "7d" (days), "24h" (hours), "30m" (minutes), "60s" (seconds)
         #[arg(long)]
         older_than: Option<String>,
-        
+
         /// Simulate pruning without actually deleting snapshots
         /// Shows what would be removed without making changes
         #[arg(long)]
@@ -138,7 +138,7 @@ enum Commands {
     ///   snapsafe verify
     ///   snapsafe verify v1.0.0.0
     Verify {
-        /// Verify only the specified snapshot ID 
+        /// Verify only the specified snapshot ID
         /// If not provided, verifies all snapshots
         snapshot_id: Option<String>,
     },
@@ -149,7 +149,7 @@ enum Commands {
     ///
     /// Examples:
     ///   snapsafe info v1.0.0.0
-    ///   snapsafe info 
+    ///   snapsafe info
     Info {
         /// Snapshot ID to show information
         /// If not provided, shows information for the latest snapshot
@@ -168,20 +168,20 @@ enum Commands {
         /// Snapshot ID to manage tags
         /// If not provided, defaults to the latest snapshot
         snapshot_id: Option<String>,
-        
+
         /// Add one or more tags to the snapshot
         #[arg(short, long, num_args = 1..)]
         add: Option<Vec<String>>,
-        
+
         /// Remove one or more tags from the snapshot
         #[arg(short, long, num_args = 1..)]
         remove: Option<Vec<String>>,
-        
+
         /// List all tags for the snapshot (default if no other options provided)
         #[arg(short, long)]
         list: bool,
     },
-    
+
     /// Manage custom metadata for snapshots
     ///
     /// Sets, removes, or lists custom key-value metadata for snapshots.
@@ -195,15 +195,15 @@ enum Commands {
         /// Snapshot ID to manage metadata
         /// If not provided, defaults to the latest snapshot
         snapshot_id: Option<String>,
-        
+
         /// Set a metadata key and value
         #[arg(short, long, num_args = 2)]
         set: Option<Vec<String>>,
-        
+
         /// Remove a metadata key and its associated value
         #[arg(short, long)]
         remove: Option<String>,
-        
+
         /// List all metadata for the snapshot (default if no other options provided)
         #[arg(short, long)]
         list: bool,
@@ -219,31 +219,47 @@ fn main() {
                 eprintln!("Error initializing repository: {}", e);
                 process::exit(1);
             }
-        },
-        Commands::Snapshot { version, message, tags, meta } => {
+        }
+        Commands::Snapshot {
+            version,
+            message,
+            tags,
+            meta,
+        } => {
             // Create the snapshot first
-            if let Err(e) = subcommands::snapshot::create_snapshot(message.clone(), version.clone()) {
+            if let Err(e) = subcommands::snapshot::create_snapshot(message.clone(), version.clone())
+            {
                 eprintln!("Error creating snapshot: {}", e);
                 process::exit(1);
             }
-            
+
             // Get the created snapshot version (likely the latest one)
             let base_path = info::get_base_dir().unwrap();
             let head_manifest = manifest::load_head_manifest(&base_path).unwrap();
             if let Some(last_snapshot) = head_manifest.last() {
                 let snapshot_id = last_snapshot.version.clone();
-                
+
                 // Add tags if provided
                 if let Some(tag_list) = tags {
-                    if let Err(e) = subcommands::tag::manage_tags(Some(snapshot_id.clone()), Some(tag_list.to_vec()), None, false) {
+                    if let Err(e) = subcommands::tag::manage_tags(
+                        Some(snapshot_id.clone()),
+                        Some(tag_list.to_vec()),
+                        None,
+                        false,
+                    ) {
                         eprintln!("Error adding tags: {}", e);
                     }
                 }
-                
+
                 // Add metadata if provided
                 if let Some(metadata) = meta {
                     if metadata.len() == 2 {
-                        if let Err(e) = subcommands::meta::manage_metadata(Some(snapshot_id.clone()), Some(metadata.to_vec()), None, false) {
+                        if let Err(e) = subcommands::meta::manage_metadata(
+                            Some(snapshot_id.clone()),
+                            Some(metadata.to_vec()),
+                            None,
+                            false,
+                        ) {
                             eprintln!("Error adding metadata: {}", e);
                         }
                     } else {
@@ -251,55 +267,88 @@ fn main() {
                     }
                 }
             }
-        },
+        }
         Commands::List => {
             if let Err(e) = subcommands::list::list_snapshots() {
                 eprintln!("Error listing snapshots: {}", e);
                 process::exit(1);
             }
-        },
-        Commands::Diff { snapshot1, snapshot2 } => {
-            if let Err(e) = subcommands::diff::diff_snapshots(snapshot1.clone(), snapshot2.clone()) {
+        }
+        Commands::Diff {
+            snapshot1,
+            snapshot2,
+        } => {
+            if let Err(e) = subcommands::diff::diff_snapshots(snapshot1.clone(), snapshot2.clone())
+            {
                 eprintln!("Error diffing snapshots: {}", e);
                 process::exit(1);
             }
-        },
-        Commands::Restore { snapshot_id, no_backup } => {
+        }
+        Commands::Restore {
+            snapshot_id,
+            no_backup,
+        } => {
             let backup = !no_backup; // Invert the flag since we want backup by default
             if let Err(e) = subcommands::restore::restore_snapshot(snapshot_id.clone(), backup) {
                 eprintln!("Error restoring snapshot: {}", e);
                 process::exit(1);
             }
-        },
-        Commands::Prune { keep_last, older_than, dry_run } => {
-            if let Err(e) = subcommands::prune::prune_snapshots(*keep_last, older_than.clone(), *dry_run) {
+        }
+        Commands::Prune {
+            keep_last,
+            older_than,
+            dry_run,
+        } => {
+            if let Err(e) =
+                subcommands::prune::prune_snapshots(*keep_last, older_than.clone(), *dry_run)
+            {
                 eprintln!("Error pruning snapshots: {}", e);
                 process::exit(1);
             }
-        },
+        }
         Commands::Verify { snapshot_id } => {
             if let Err(e) = subcommands::verify::verify_snapshots(snapshot_id.clone()) {
                 eprintln!("Error verifying snapshots: {}", e);
                 process::exit(1);
             }
-        },
+        }
         Commands::Info { snapshot_id } => {
             if let Err(e) = subcommands::info::show_snapshot_info(snapshot_id.clone()) {
                 eprintln!("Error showing snapshot info: {}", e);
                 process::exit(1);
             }
-        },
-        Commands::Tag { snapshot_id, add, remove, list } => {
-            if let Err(e) = subcommands::tag::manage_tags(snapshot_id.clone(), add.clone(), remove.clone(), *list) {
+        }
+        Commands::Tag {
+            snapshot_id,
+            add,
+            remove,
+            list,
+        } => {
+            if let Err(e) = subcommands::tag::manage_tags(
+                snapshot_id.clone(),
+                add.clone(),
+                remove.clone(),
+                *list,
+            ) {
                 eprintln!("Error managing tags: {}", e);
                 process::exit(1);
             }
-        },
-        Commands::Meta { snapshot_id, set, remove, list } => {
-            if let Err(e) = subcommands::meta::manage_metadata(snapshot_id.clone(), set.clone(), remove.clone(), *list) {
+        }
+        Commands::Meta {
+            snapshot_id,
+            set,
+            remove,
+            list,
+        } => {
+            if let Err(e) = subcommands::meta::manage_metadata(
+                snapshot_id.clone(),
+                set.clone(),
+                remove.clone(),
+                *list,
+            ) {
                 eprintln!("Error managing metadata: {}", e);
                 process::exit(1);
             }
-        },
+        }
     }
 }

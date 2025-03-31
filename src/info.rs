@@ -27,7 +27,7 @@ pub fn get_next_version(head: &[SnapshotIndex], version: Option<String>) -> Stri
             } else {
                 user_version
             }
-        } 
+        }
         // If it's a simple number like "1" or "2"
         else if user_version.chars().all(|c| c.is_ascii_digit()) {
             format!("v{}.0.0.0", user_version)
@@ -36,13 +36,13 @@ pub fn get_next_version(head: &[SnapshotIndex], version: Option<String>) -> Stri
         else {
             let trimmed = user_version.trim_start_matches('v');
             let parts: Vec<&str> = trimmed.split('.').collect();
-            
+
             match parts.len() {
                 1 => format!("v{}.0.0.0", parts[0]),
                 2 => format!("v{}.{}.0.0", parts[0], parts[1]),
                 3 => format!("v{}.{}.{}.0", parts[0], parts[1], parts[2]),
                 4 => format!("v{}.{}.{}.{}", parts[0], parts[1], parts[2], parts[3]),
-                _ => "v1.0.0.0".to_string() // Fallback for unexpected formats
+                _ => "v1.0.0.0".to_string(), // Fallback for unexpected formats
             }
         }
     } else {
@@ -74,37 +74,46 @@ pub fn get_next_version(head: &[SnapshotIndex], version: Option<String>) -> Stri
 /// - "latest" (returns the latest snapshot)
 /// - Exact version match
 /// - Prefix version match
-pub fn resolve_snapshot_id(snapshot_id: Option<String>, head_manifest: &[SnapshotIndex]) -> io::Result<String> {
+pub fn resolve_snapshot_id(
+    snapshot_id: Option<String>,
+    head_manifest: &[SnapshotIndex],
+) -> io::Result<String> {
     if head_manifest.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "No snapshots available."));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "No snapshots available.",
+        ));
     }
 
     match snapshot_id {
         None => {
             // If no ID provided, use the latest snapshot
             Ok(head_manifest.last().unwrap().version.clone())
-        },
+        }
         Some(id) => {
             // Check if the ID is "latest"
             if id.to_lowercase() == "latest" {
                 Ok(head_manifest.last().unwrap().version.clone())
             } else {
                 // Try exact match first
-                let exact_match = head_manifest.iter()
+                let exact_match = head_manifest
+                    .iter()
                     .find(|s| s.version == id)
                     .map(|s| s.version.clone());
-                
+
                 // If no exact match, try prefix match
                 match exact_match {
                     Some(v) => Ok(v),
-                    None => {
-                        head_manifest.iter()
-                            .find(|s| s.version.starts_with(&id))
-                            .map(|s| s.version.clone())
-                            .ok_or_else(|| {
-                                io::Error::new(io::ErrorKind::NotFound, format!("Snapshot {} not found", id))
-                            })
-                    }
+                    None => head_manifest
+                        .iter()
+                        .find(|s| s.version.starts_with(&id))
+                        .map(|s| s.version.clone())
+                        .ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::NotFound,
+                                format!("Snapshot {} not found", id),
+                            )
+                        }),
                 }
             }
         }

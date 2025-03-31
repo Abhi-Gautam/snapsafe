@@ -1,12 +1,12 @@
+use crate::constants::{IGNORE_FILE, MANIFEST_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER};
+use crate::info;
+use crate::manifest;
+use crate::models::{FileMetadata, SnapshotIndex};
+use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use chrono::{Local, DateTime};
-use crate::constants::{IGNORE_FILE, MANIFEST_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER};
-use crate::models::{SnapshotIndex, FileMetadata};
-use crate::info;
-use crate::manifest;
 
 /// Creates a new snapshot using the current directory as the base.
 /// The new snapshot folder name is determined by the versioning scheme (using an optional tag
@@ -22,7 +22,10 @@ pub fn create_snapshot(message: Option<String>, version: Option<String>) -> io::
     let snapshots_path = repo_path.join(SNAPSHOTS_FOLDER);
 
     if !repo_path.exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "Repository not initialized. Please run the init command first."));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Repository not initialized. Please run the init command first.",
+        ));
     }
 
     // Load head manifest.
@@ -37,7 +40,10 @@ pub fn create_snapshot(message: Option<String>, version: Option<String>) -> io::
         if version.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
-                format!("A snapshot with version {} already exists. Please choose a different version.", new_version)
+                format!(
+                    "A snapshot with version {} already exists. Please choose a different version.",
+                    new_version
+                ),
             ));
         }
     }
@@ -84,7 +90,6 @@ pub fn create_snapshot(message: Option<String>, version: Option<String>) -> io::
     println!("Snapshot created successfully.");
     Ok(())
 }
-
 
 /// Reads the ignore list from the .snapsafeignore file in the base directory.
 /// Each non-empty, non-comment line is treated as a literal file or directory name to ignore.
@@ -137,15 +142,25 @@ fn copy_or_link_recursive_with_metadata(
 
         if path.is_dir() {
             fs::create_dir_all(&dest_path)?;
-            copy_or_link_recursive_with_metadata(&path, &dest_path, skip_dir, base, ignore_list, prev_snapshot, metadata)?;
+            copy_or_link_recursive_with_metadata(
+                &path,
+                &dest_path,
+                skip_dir,
+                base,
+                ignore_list,
+                prev_snapshot,
+                metadata,
+            )?;
         } else if path.is_file() {
             let meta = fs::metadata(&path)?;
             let file_size = meta.len();
-            let modified_time: DateTime<Local> = meta.modified()
+            let modified_time: DateTime<Local> = meta
+                .modified()
                 .map(DateTime::<Local>::from)
                 .unwrap_or_else(|_| Local::now());
             let modified_str = modified_time.format("%Y-%m-%d %H:%M:%S").to_string();
-            let relative_path = path.strip_prefix(base)
+            let relative_path = path
+                .strip_prefix(base)
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .to_string();
