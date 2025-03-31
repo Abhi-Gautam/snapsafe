@@ -44,7 +44,7 @@ jobs:
             cp target/${{ matrix.target }}/release/snapsafe dist/
           fi
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: snapsafe-${{ matrix.target }}
           path: dist/
@@ -54,7 +54,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Create Release
