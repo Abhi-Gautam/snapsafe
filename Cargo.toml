@@ -2,9 +2,21 @@
 name = "snapsafe"
 version = "0.1.0"
 edition = "2021"
+authors = ["Abhishek Gautam <abhishekgautam011@gmail.com>"]
+description = "A lightning-fast, lightweight command-line tool for creating efficient directory snapshots"
+readme = "README.md"
+repository = "https://github.com/Abhi-Gautam/snapsafe"
+license = "MIT"
+keywords = ["backup", "snapshot", "filesystem", "cli"]
+categories = ["command-line-utilities", "filesystem"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "2.0"
+tempfile = "3.3"

@@ -13,7 +13,10 @@
 - **💼 Metadata Management** - Attach custom metadata to snapshots, including tags and key-value properties
 - **🔄 Simple Workflow** - Designed for clarity and ease of use with an intuitive command set
 - **📊 Smart Analysis** - Built-in tools to compare, verify, and manage snapshots
-- **📝 Text-based Diffing** - Specialized handling for configuration files (.json, .yaml, etc.)
+- **🔍 Version Management** - Intelligent versioning system with customizable versions
+- **🧹 Cleanup Tools** - Prune old snapshots based on age or count
+- **🏷️ Tagging System** - Organize snapshots with custom tags for easy reference
+- **⚙️ Configurable** - Adjust settings to match your workflow preferences
 
 ## 📋 Table of Contents
 
@@ -73,7 +76,7 @@ snapsafe restore v1.0.0.0
 | Command | Description |
 |---------|-------------|
 | `init` | Initialize Snap Safe in the current directory |
-| `snapshot [-m MSG] [-t TAG]` | Create a new snapshot with optional message and tag |
+| `snapshot [-m MSG] [-v VERSION] [--tags TAG...] [--meta KEY VALUE]` | Create a new snapshot with optional message, version, tags, and metadata |
 | `list` | List all available snapshots |
 | `diff [SNAPSHOT1] [SNAPSHOT2]` | Show differences between snapshots |
 | `restore SNAPSHOT_ID` | Restore the working directory to a snapshot |
@@ -84,8 +87,9 @@ snapsafe restore v1.0.0.0
 |---------|-------------|
 | `prune --keep-last N` | Keep only the N most recent snapshots |
 | `prune --older-than DURATION` | Remove snapshots older than specified duration (e.g., "7d") |
+| `prune --dry-run` | Show what would be pruned without actually deleting
 | `verify [SNAPSHOT_ID]` | Verify the integrity of snapshots |
-| `info SNAPSHOT_ID` | Display detailed information about a snapshot |
+| `info [SNAPSHOT_ID]` | Display detailed information about a snapshot |
 
 ### Metadata Commands
 
@@ -157,11 +161,11 @@ Track changes to configuration across environments:
 
 ```bash
 # Store a snapshot of configuration
-snapsafe snapshot -m "Production config" --add production
-snapsafe snapshot -m "Staging config" --add staging
+snapsafe snapshot -v 1.0.0.0 -m "Production config" --add production
+snapsafe snapshot -v 1.0.0.1 -m "Staging config" --add staging
 
 # View what's different between environments
-snapsafe text-diff production staging
+snapsafe diff v1.0.0.0 v1.0.0.1
 ```
 
 ## 🔧 How It Works
@@ -179,6 +183,9 @@ Snap Safe creates efficient snapshots through a combination of techniques:
 
 4. **Specialized Diffing**:  
    Between snapshots, Snap Safe can identify what files were added, removed, or modified.
+
+4. **Integrity Verification**:  
+   Built-in verification tools ensure your snapshots maintain integrity over time.
 
 
 ## 📊 Comparing with Other Tools
