@@ -68,6 +68,46 @@ enum Commands {
         /// Snapshot ID to show information for
         snapshot_id: String,
     },
+    /// Configure Snap Safe settings
+    Config {
+        /// Set configuration key and value
+        #[arg(short, long, num_args = 2)]
+        set: Option<Vec<String>>,
+        /// Get configuration value for a key
+        #[arg(short, long)]
+        get: Option<String>,
+        /// List all configuration settings
+        #[arg(short, long)]
+        list: bool,
+    },
+    /// Manage tags for a snapshot
+    Tag {
+        /// Snapshot ID to add tags to
+        snapshot_id: String,
+        /// Add tags to the snapshot
+        #[arg(short, long)]
+        add: Option<Vec<String>>,
+        /// Remove tags from the snapshot
+        #[arg(short, long)]
+        remove: Option<Vec<String>>,
+        /// List tags for the snapshot (default if no other options provided)
+        #[arg(short, long)]
+        list: bool,
+    },
+    /// Manage custom metadata for a snapshot
+    Meta {
+        /// Snapshot ID to manage metadata for
+        snapshot_id: String,
+        /// Set a metadata key and value
+        #[arg(short, long, num_args = 2)]
+        set: Option<Vec<String>>,
+        /// Remove a metadata key
+        #[arg(short, long)]
+        remove: Option<String>,
+        /// List all metadata for the snapshot (default if no other options provided)
+        #[arg(short, long)]
+        list: bool,
+    },
 }
 
 fn main() {
@@ -120,6 +160,24 @@ fn main() {
         Commands::Info { snapshot_id } => {
             if let Err(e) = subcommands::info::show_snapshot_info(snapshot_id.clone()) {
                 eprintln!("Error showing snapshot info: {}", e);
+                process::exit(1);
+            }
+        },
+        Commands::Config { set, get, list } => {
+            if let Err(e) = subcommands::config::configure(set.clone(), get.clone(), *list) {
+                eprintln!("Error configuring: {}", e);
+                process::exit(1);
+            }
+        },
+        Commands::Tag { snapshot_id, add, remove, list } => {
+            if let Err(e) = subcommands::tag::manage_tags(snapshot_id.clone(), add.clone(), remove.clone(), *list) {
+                eprintln!("Error managing tags: {}", e);
+                process::exit(1);
+            }
+        },
+        Commands::Meta { snapshot_id, set, remove, list } => {
+            if let Err(e) = subcommands::meta::manage_metadata(snapshot_id.clone(), set.clone(), remove.clone(), *list) {
+                eprintln!("Error managing metadata: {}", e);
                 process::exit(1);
             }
         },

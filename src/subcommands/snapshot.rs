@@ -74,6 +74,7 @@ pub fn create_snapshot(message: Option<String>, tag: Option<String>) -> io::Resu
         version: new_version.clone(),
         timestamp,
         message,
+        metadata: None,
     };
 
     // Update the head manifest.

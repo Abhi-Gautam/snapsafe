@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
 
 /// Structure to hold metadata for a single file.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -11,6 +12,15 @@ pub struct FileMetadata {
     pub modified: String,
 }
 
+/// Structure for custom metadata attached to a snapshot
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct SnapshotMetadata {
+    /// Tags assigned to the snapshot
+    pub tags: Vec<String>,
+    /// Custom key-value properties
+    pub custom: HashMap<String, String>,
+}
+
 /// Structure to represent a snapshot entry in the head manifest.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SnapshotIndex {
@@ -20,4 +30,26 @@ pub struct SnapshotIndex {
     pub timestamp: String,
     /// An optional message provided by the user.
     pub message: Option<String>,
+    /// Optional metadata for the snapshot
+    #[serde(default)]
+    pub metadata: Option<SnapshotMetadata>,
+}
+
+/// Structure for the configuration file
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SnapsafeConfig {
+    /// Key-value store for configuration settings
+    pub settings: HashMap<String, String>,
+}
+
+impl Default for SnapsafeConfig {
+    fn default() -> Self {
+        let mut settings = HashMap::new();
+        settings.insert("autobackup".to_string(), "true".to_string());
+        settings.insert("compression".to_string(), "none".to_string());
+        
+        SnapsafeConfig {
+            settings,
+        }
+    }
 }

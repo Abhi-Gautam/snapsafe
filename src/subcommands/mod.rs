@@ -6,3 +6,6 @@ pub mod restore;
 pub mod prune;
 pub mod verify;
 pub mod info;
+pub mod config;
+pub mod tag;
+pub mod meta;
