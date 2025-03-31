@@ -41,16 +41,32 @@ enum Commands {
     /// Restore a snapshot
     Restore {
         /// Snapshot ID to restore
-        snapshot_id: String,
+        snapshot_id: Option<String>,
+        /// Skip creating a backup before restoring
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        no_backup: bool,
     },
-    /// Configure Snap Safe settings
-    Config {
-        /// Set configuration key and value
-        #[arg(short, long, num_args = 2)]
-        set: Option<Vec<String>>,
-        /// Get configuration value for a key
-        #[arg(short, long)]
-        get: Option<String>,
+    /// Remove old snapshots based on criteria
+    Prune {
+        /// Keep only the N most recent snapshots
+        #[arg(long)]
+        keep_last: Option<usize>,
+        /// Remove snapshots older than the specified duration (e.g., "7d", "24h", "30m")
+        #[arg(long)]
+        older_than: Option<String>,
+        /// Perform a dry run without actually deleting snapshots
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Verify the integrity of snapshots
+    Verify {
+        /// Verify only the specified snapshot (all snapshots if not specified)
+        snapshot_id: Option<String>,
+    },
+    /// Show detailed information about a snapshot
+    Info {
+        /// Snapshot ID to show information for
+        snapshot_id: String,
     },
 }
 
@@ -82,25 +98,29 @@ fn main() {
                 process::exit(1);
             }
         },
-        Commands::Restore { snapshot_id } => {
-            println!("Restoring snapshot: {}", snapshot_id);
-            // TODO: Implement restore logic here.
+        Commands::Restore { snapshot_id, no_backup } => {
+            let backup = !no_backup; // Invert the flag since we want backup by default
+            if let Err(e) = subcommands::restore::restore_snapshot(snapshot_id.clone(), backup) {
+                eprintln!("Error restoring snapshot: {}", e);
+                process::exit(1);
+            }
         },
-        Commands::Config { set, get } => {
-            if let Some(values) = set {
-                if values.len() == 2 {
-                    let key = &values[0];
-                    let value = &values[1];
-                    println!("Setting configuration: {} = {}", key, value);
-                    // TODO: Implement configuration set logic.
-                } else {
-                    println!("Error: Please provide exactly two values for --set: a key and a value.");
-                }
-            } else if let Some(key) = get {
-                println!("Retrieving configuration for key: {}", key);
-                // TODO: Implement configuration get logic.
-            } else {
-                println!("No configuration option provided. Use --set or --get.");
+        Commands::Prune { keep_last, older_than, dry_run } => {
+            if let Err(e) = subcommands::prune::prune_snapshots(*keep_last, older_than.clone(), *dry_run) {
+                eprintln!("Error pruning snapshots: {}", e);
+                process::exit(1);
+            }
+        },
+        Commands::Verify { snapshot_id } => {
+            if let Err(e) = subcommands::verify::verify_snapshots(snapshot_id.clone()) {
+                eprintln!("Error verifying snapshots: {}", e);
+                process::exit(1);
+            }
+        },
+        Commands::Info { snapshot_id } => {
+            if let Err(e) = subcommands::info::show_snapshot_info(snapshot_id.clone()) {
+                eprintln!("Error showing snapshot info: {}", e);
+                process::exit(1);
             }
         },
     }

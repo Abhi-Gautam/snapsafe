@@ -28,17 +28,24 @@ pub fn create_snapshot(message: Option<String>, tag: Option<String>) -> io::Resu
     // Load head manifest.
     let mut head_manifest = manifest::load_head_manifest(&base_path)?;
     // Determine new version string.
-    let new_version = info::get_next_version(&head_manifest, tag);
+    let new_version = info::get_next_version(&head_manifest, tag.clone());
 
     // New snapshot folder is named by the version.
     let snapshot_dir = snapshots_path.join(&new_version);
+    if snapshot_dir.exists() {
+        // If a specific tag was provided, return an error
+        if tag.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("A snapshot with version {} already exists. Please choose a different tag.", new_version)
+            ));
+        }
+    }
     fs::create_dir(&snapshot_dir)?;
 
     if let Some(ref msg) = message {
         println!("Snapshot message: {}", msg);
     }
-
-
 
     // Load previous snapshot manifest (if any) using the head manifest.
     let prev_snapshot = manifest::load_last_snapshot_manifest(&base_path, &head_manifest)?;

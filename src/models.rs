@@ -12,7 +12,7 @@ pub struct FileMetadata {
 }
 
 /// Structure to represent a snapshot entry in the head manifest.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SnapshotIndex {
     /// The version string (e.g., "v1.0.0.0" or "vrelease" if provided).
     pub version: String,
