@@ -2,7 +2,6 @@ name: Release
 
 on:
   push:
-    branches: ['main']
     tags:
       - 'v*'
 
@@ -65,18 +64,29 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: snapsafe-${{ matrix.target }}
-          path: dist/
+          path: dist
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3
         with:
           path: artifacts
+      
+      - name: Display structure of downloaded files
+        run: find artifacts -type f | sort
+        
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f -name "snapsafe*" -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/snapsafe-*/snapsafe*
+          tag_name: ${{ github.ref_name }}
+          files: release-assets/*
           generate_release_notes: true
