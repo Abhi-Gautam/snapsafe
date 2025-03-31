@@ -35,7 +35,7 @@ pub fn show_snapshot_info(snapshot_id: Option<String>) -> io::Result<()> {
     if let Some(ref msg) = snapshot.message {
         println!("Message:    {}", msg);
     }
-    println!("");
+    println!();
     
     println!("Statistics");
     println!("==========");
@@ -43,7 +43,7 @@ pub fn show_snapshot_info(snapshot_id: Option<String>) -> io::Result<()> {
     println!("Total size:        {} bytes ({} MB)", stats.total_size, stats.total_size / 1024 / 1024);
     println!("Largest file:      {} bytes ({})", stats.largest_file_size, stats.largest_file_path);
     println!("Average file size: {} bytes", stats.average_file_size);
-    println!("");
+    println!();
     
     println!("File Types");
     println!("==========");

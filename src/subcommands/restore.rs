@@ -98,7 +98,7 @@ pub fn restore_snapshot(snapshot_id: Option<String>, backup: bool) -> io::Result
     io::stdin().read_line(&mut input)?;
     
     // Restore each file from the snapshot to the working directory
-    for (relative_path, _) in &manifest {
+    for relative_path in manifest.keys() {
         let target_path = base_path.join(relative_path);
         let source_path = snapshot_path.join(relative_path);
         

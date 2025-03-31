@@ -41,7 +41,7 @@ pub fn prune_snapshots(
     
     // If older_than is specified, delete snapshots older than the specified duration
     if let Some(ref duration_str) = older_than {
-        let duration = parse_duration(&duration_str)
+        let duration = parse_duration(duration_str)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
         
         let cutoff_time = Local::now() - duration;
@@ -120,8 +120,8 @@ fn parse_duration(duration_str: &str) -> Result<Duration, String> {
     let mut num_str = String::new();
     
     // Extract the numeric part
-    while let Some(c) = chars.next() {
-        if c.is_digit(10) {
+    for c in chars.by_ref() {
+        if c.is_ascii_digit() {
             num_str.push(c);
         } else {
             break;

@@ -53,7 +53,7 @@ pub fn diff_snapshots(version1: String, version2: Option<String>) -> io::Result<
         for file in &added {
             println!("{}", file);
         }
-        println!("");
+        println!();
     }
     
     if !removed.is_empty() {
@@ -62,7 +62,7 @@ pub fn diff_snapshots(version1: String, version2: Option<String>) -> io::Result<
         for file in &removed {
             println!("{}", file);
         }
-        println!("");
+        println!();
     }
     
     if !updated.is_empty() {
@@ -71,7 +71,7 @@ pub fn diff_snapshots(version1: String, version2: Option<String>) -> io::Result<
         for file in &updated {
             println!("{}", file);
         }
-        println!("");
+        println!();
     }
     
     if added.is_empty() && removed.is_empty() && updated.is_empty() {

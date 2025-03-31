@@ -61,7 +61,7 @@ pub fn load_snapshot_manifest(base_path: &Path, version: &str) -> io::Result<Opt
 /// Loads the previous snapshot's detailed manifest (if any) from the head manifest.
 /// Returns an Option with a tuple containing the snapshot folder path and a HashMap
 /// mapping each file's relative path to its FileMetadata.
-pub fn load_last_snapshot_manifest(base_path: &Path, head: &Vec<SnapshotIndex>) -> io::Result<Option<(PathBuf, HashMap<String, FileMetadata>)>> {
+pub fn load_last_snapshot_manifest(base_path: &Path, head: &[SnapshotIndex]) -> io::Result<Option<(PathBuf, HashMap<String, FileMetadata>)>> {
     if head.is_empty() {
         return Ok(None);
     }

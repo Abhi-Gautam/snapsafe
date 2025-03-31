@@ -9,7 +9,7 @@ pub fn get_base_dir() -> io::Result<PathBuf> {
 
 /// Given the current head manifest and an optional user-provided version,
 /// returns the next snapshot version string.
-pub fn get_next_version(head: &Vec<SnapshotIndex>, version: Option<String>) -> String {
+pub fn get_next_version(head: &[SnapshotIndex], version: Option<String>) -> String {
     if let Some(user_version) = version {
         // Handle different version input formats
         // If it's already a full version with a "v" prefix, use it directly
@@ -29,7 +29,7 @@ pub fn get_next_version(head: &Vec<SnapshotIndex>, version: Option<String>) -> S
             }
         } 
         // If it's a simple number like "1" or "2"
-        else if user_version.chars().all(|c| c.is_digit(10)) {
+        else if user_version.chars().all(|c| c.is_ascii_digit()) {
             format!("v{}.0.0.0", user_version)
         }
         // If it's a partial version like "1.2" or "2.3.1"
@@ -42,7 +42,7 @@ pub fn get_next_version(head: &Vec<SnapshotIndex>, version: Option<String>) -> S
                 2 => format!("v{}.{}.0.0", parts[0], parts[1]),
                 3 => format!("v{}.{}.{}.0", parts[0], parts[1], parts[2]),
                 4 => format!("v{}.{}.{}.{}", parts[0], parts[1], parts[2], parts[3]),
-                _ => format!("v1.0.0.0") // Fallback for unexpected formats
+                _ => "v1.0.0.0".to_string() // Fallback for unexpected formats
             }
         }
     } else {

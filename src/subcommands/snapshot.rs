@@ -161,12 +161,8 @@ fn copy_or_link_recursive_with_metadata(
                 if let Some(prev_meta) = prev_manifest.get(&relative_path) {
                     if prev_meta.file_size == file_size && prev_meta.modified == modified_str {
                         let prev_file_path = prev_snapshot_dir.join(&relative_path);
-                        match fs::hard_link(&prev_file_path, &dest_path) {
-                            Ok(_) => {
-                                used_hard_link = true;
-                            },
-                            Err(_) => {
-                            }
+                        if fs::hard_link(&prev_file_path, &dest_path).is_ok() {
+                            used_hard_link = true;
                         }
                     }
                 }
