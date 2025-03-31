@@ -1,3 +1,16 @@
+//! # Snap Safe
+//! 
+//! Snap Safe is a lightning-fast, lightweight command-line tool for creating 
+//! efficient directory snapshots. It leverages hard links to provide space-efficient
+//! backups with minimal overhead.
+//! 
+//! ## Features
+//! 
+//! - **Efficient Incremental Snapshots**: Uses hard links to avoid duplicating unchanged files
+//! - **Blazing Fast Performance**: Written in Rust for maximum speed and minimal resource consumption
+//! - **Metadata Management**: Attach custom metadata to snapshots, including tags and key-value properties
+//! 
+
 use clap::{Parser, Subcommand};
 use std::process;
 mod models;
@@ -6,12 +19,6 @@ mod manifest;
 mod constants;
 mod subcommands;
 
-/// Snap Safe: A CLI tool for efficient directory snapshots management
-///
-/// Snap Safe leverages hard links to create space-efficient, incremental
-/// snapshots of your directory contents. It's designed to manage file versioning
-/// with minimal overhead, perfect for build artifacts, large binary files,
-/// configuration management, and deployment tracking.
 #[derive(Parser)]
 #[command(name = "snapsafe")]
 #[command(about = "Snap Safe: A CLI tool for efficient snapshots management", long_about = None)]
