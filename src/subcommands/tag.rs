@@ -6,19 +6,21 @@ use crate::models::SnapshotMetadata;
 
 /// Add, remove, or list tags for snapshots
 pub fn manage_tags(
-    snapshot_id: String,
+    snapshot_id: Option<String>,
     add: Option<Vec<String>>,
     remove: Option<Vec<String>>,
     list: bool,
 ) -> io::Result<()> {
     let base_path = info::get_base_dir()?;
     let mut head_manifest = load_head_manifest(&base_path)?;
+
+    let actual_id = info::resolve_snapshot_id(snapshot_id, &head_manifest)?;
     
     // Find the snapshot in the head manifest
     let snapshot_index = head_manifest
         .iter()
-        .position(|s| s.version == snapshot_id || s.version.starts_with(&snapshot_id))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Snapshot {} not found", snapshot_id)))?;
+        .position(|s| s.version == actual_id || s.version.starts_with(&actual_id))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Snapshot {} not found", actual_id)))?;
     
     // Add tags
     if let Some(ref tags) = add {  // Use ref to avoid moving tags
