@@ -14,7 +14,7 @@ use crate::manifest;
 /// if a file is unchanged compared to the previous snapshot (by size and modification time),
 /// a hard link is created instead of copying. Detailed file metadata is collected and written
 /// to a manifest file in the snapshot folder. The head manifest is updated with the new snapshot entry.
-pub fn create_snapshot(message: Option<String>, tag: Option<String>) -> io::Result<()> {
+pub fn create_snapshot(message: Option<String>, version: Option<String>) -> io::Result<()> {
     let base_path = info::get_base_dir()?;
     let ignore_list = read_ignore_list(&base_path)?;
 
@@ -28,16 +28,16 @@ pub fn create_snapshot(message: Option<String>, tag: Option<String>) -> io::Resu
     // Load head manifest.
     let mut head_manifest = manifest::load_head_manifest(&base_path)?;
     // Determine new version string.
-    let new_version = info::get_next_version(&head_manifest, tag.clone());
+    let new_version = info::get_next_version(&head_manifest, version.clone());
 
     // New snapshot folder is named by the version.
     let snapshot_dir = snapshots_path.join(&new_version);
     if snapshot_dir.exists() {
-        // If a specific tag was provided, return an error
-        if tag.is_some() {
+        // If a specific version was provided, return an error
+        if version.is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
-                format!("A snapshot with version {} already exists. Please choose a different tag.", new_version)
+                format!("A snapshot with version {} already exists. Please choose a different version.", new_version)
             ));
         }
     }
@@ -74,6 +74,7 @@ pub fn create_snapshot(message: Option<String>, tag: Option<String>) -> io::Resu
         version: new_version.clone(),
         timestamp,
         message,
+        metadata: None,
     };
 
     // Update the head manifest.

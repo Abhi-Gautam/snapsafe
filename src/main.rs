@@ -22,12 +22,18 @@ enum Commands {
 
     /// Create a new snapshot
     Snapshot {
-        /// Optional tag for the snapshot.
+        /// Optional version for the snapshot
         #[arg(short, long)]
-        tag: Option<String>,
-        /// Optional message describing the snapshot.
+        version: Option<String>,
+        /// Optional message describing the snapshot
         #[arg(short, long)]
         message: Option<String>,
+        /// Add tags to the snapshot
+        #[arg(long, num_args = 1..)]
+        tags: Option<Vec<String>>,
+        /// Add metadata to the snapshot in key=value format
+        #[arg(long, num_args = 2, value_names = &["KEY", "VALUE"])]
+        meta: Option<Vec<String>>,
     },
     /// List all snapshots
     List,
@@ -66,7 +72,47 @@ enum Commands {
     /// Show detailed information about a snapshot
     Info {
         /// Snapshot ID to show information for
-        snapshot_id: String,
+        snapshot_id: Option<String>,
+    },
+    /// Configure Snap Safe settings
+    Config {
+        /// Set configuration key and value
+        #[arg(short, long, num_args = 2)]
+        set: Option<Vec<String>>,
+        /// Get configuration value for a key
+        #[arg(short, long)]
+        get: Option<String>,
+        /// List all configuration settings
+        #[arg(short, long)]
+        list: bool,
+    },
+    /// Manage tags for a snapshot
+    Tag {
+        /// Snapshot ID to add tags to
+        snapshot_id: Option<String>,
+        /// Add tags to the snapshot
+        #[arg(short, long, num_args = 1..)]
+        add: Option<Vec<String>>,
+        /// Remove tags from the snapshot
+        #[arg(short, long, num_args = 1..)]
+        remove: Option<Vec<String>>,
+        /// List tags for the snapshot (default if no other options provided)
+        #[arg(short, long)]
+        list: bool,
+    },
+    /// Manage custom metadata for a snapshot
+    Meta {
+        /// Snapshot ID to manage metadata for
+        snapshot_id: Option<String>,
+        /// Set a metadata key and value
+        #[arg(short, long, num_args = 2)]
+        set: Option<Vec<String>>,
+        /// Remove a metadata key
+        #[arg(short, long)]
+        remove: Option<String>,
+        /// List all metadata for the snapshot (default if no other options provided)
+        #[arg(short, long)]
+        list: bool,
     },
 }
 
@@ -80,10 +126,36 @@ fn main() {
                 process::exit(1);
             }
         },
-        Commands::Snapshot { tag, message } => {
-            if let Err(e) = subcommands::snapshot::create_snapshot(message.clone(), tag.clone()) {
+        Commands::Snapshot { version, message, tags, meta } => {
+            // Create the snapshot first
+            if let Err(e) = subcommands::snapshot::create_snapshot(message.clone(), version.clone()) {
                 eprintln!("Error creating snapshot: {}", e);
                 process::exit(1);
+            }
+            
+            // Get the created snapshot version (likely the latest one)
+            let base_path = info::get_base_dir().unwrap();
+            let head_manifest = manifest::load_head_manifest(&base_path).unwrap();
+            if let Some(last_snapshot) = head_manifest.last() {
+                let snapshot_id = last_snapshot.version.clone();
+                
+                // Add tags if provided
+                if let Some(tag_list) = tags {
+                    if let Err(e) = subcommands::tag::manage_tags(Some(snapshot_id.clone()), Some(tag_list.to_vec()), None, false) {
+                        eprintln!("Error adding tags: {}", e);
+                    }
+                }
+                
+                // Add metadata if provided
+                if let Some(metadata) = meta {
+                    if metadata.len() == 2 {
+                        if let Err(e) = subcommands::meta::manage_metadata(Some(snapshot_id.clone()), Some(metadata.to_vec()), None, false) {
+                            eprintln!("Error adding metadata: {}", e);
+                        }
+                    } else {
+                        eprintln!("Error: Please provide exactly two values for --meta: a key and a value.");
+                    }
+                }
             }
         },
         Commands::List => {
@@ -120,6 +192,24 @@ fn main() {
         Commands::Info { snapshot_id } => {
             if let Err(e) = subcommands::info::show_snapshot_info(snapshot_id.clone()) {
                 eprintln!("Error showing snapshot info: {}", e);
+                process::exit(1);
+            }
+        },
+        Commands::Config { set, get, list } => {
+            if let Err(e) = subcommands::config::configure(set.clone(), get.clone(), *list) {
+                eprintln!("Error configuring: {}", e);
+                process::exit(1);
+            }
+        },
+        Commands::Tag { snapshot_id, add, remove, list } => {
+            if let Err(e) = subcommands::tag::manage_tags(snapshot_id.clone(), add.clone(), remove.clone(), *list) {
+                eprintln!("Error managing tags: {}", e);
+                process::exit(1);
+            }
+        },
+        Commands::Meta { snapshot_id, set, remove, list } => {
+            if let Err(e) = subcommands::meta::manage_metadata(snapshot_id.clone(), set.clone(), remove.clone(), *list) {
+                eprintln!("Error managing metadata: {}", e);
                 process::exit(1);
             }
         },

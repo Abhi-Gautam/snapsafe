@@ -7,19 +7,21 @@ use crate::manifest::{self, load_head_manifest};
 use crate::models::FileMetadata;
 
 /// Display detailed information about a specific snapshot
-pub fn show_snapshot_info(snapshot_id: String) -> io::Result<()> {
+pub fn show_snapshot_info(snapshot_id: Option<String>) -> io::Result<()> {
     let base_path = info::get_base_dir()?;
     let head_manifest = load_head_manifest(&base_path)?;
+
+    let actual_id = info::resolve_snapshot_id(snapshot_id, &head_manifest)?;
     
     // Find the snapshot in the head manifest
     let snapshot = head_manifest.iter()
-        .find(|s| s.version == snapshot_id || s.version.starts_with(&snapshot_id))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Snapshot {} not found", snapshot_id)))?;
+        .find(|s| s.version == actual_id || s.version.starts_with(&actual_id))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Snapshot {} not found", actual_id)))?;
     
     // Load the snapshot manifest
     let snap_option = manifest::load_snapshot_manifest(&base_path, &snapshot.version)?;
     let (_snapshot_dir, manifest) = snap_option.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, format!("Manifest for snapshot {} not found", snapshot_id))
+        io::Error::new(io::ErrorKind::NotFound, format!("Manifest for snapshot {} not found", actual_id))
     })?;
     
     // Calculate statistics
