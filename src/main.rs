@@ -155,30 +155,6 @@ enum Commands {
         /// If not provided, shows information for the latest snapshot
         snapshot_id: Option<String>,
     },
-    /// Configure Snap Safe settings
-    ///
-    /// Manages Snap Safe configuration options. Settings control behavior
-    /// like automatic backups, compression, and default snapshot messages.
-    ///
-    /// Examples:
-    ///   snapsafe config --set autobackup false
-    ///   snapsafe config --get autobackup
-    ///   snapsafe config --list
-    Config {
-        /// Set a configuration key and value
-        /// Available keys: autobackup, compression, default_snapshot_message,
-        /// max_backups, verify_after_snapshot, text_diff_extensions
-        #[arg(short, long, num_args = 2)]
-        set: Option<Vec<String>>,
-        
-        /// Get the value of a configuration key
-        #[arg(short, long)]
-        get: Option<String>,
-        
-        /// List all configuration settings and their current values
-        #[arg(short, long)]
-        list: bool,
-    },
     /// Manage tags for snapshots
     ///
     /// Adds, removes, or lists tags associated with snapshots.
@@ -310,12 +286,6 @@ fn main() {
         Commands::Info { snapshot_id } => {
             if let Err(e) = subcommands::info::show_snapshot_info(snapshot_id.clone()) {
                 eprintln!("Error showing snapshot info: {}", e);
-                process::exit(1);
-            }
-        },
-        Commands::Config { set, get, list } => {
-            if let Err(e) = subcommands::config::configure(set.clone(), get.clone(), *list) {
-                eprintln!("Error configuring: {}", e);
                 process::exit(1);
             }
         },

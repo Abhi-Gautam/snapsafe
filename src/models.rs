@@ -34,22 +34,3 @@ pub struct SnapshotIndex {
     #[serde(default)]
     pub metadata: Option<SnapshotMetadata>,
 }
-
-/// Structure for the configuration file
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct SnapsafeConfig {
-    /// Key-value store for configuration settings
-    pub settings: HashMap<String, String>,
-}
-
-impl Default for SnapsafeConfig {
-    fn default() -> Self {
-        let mut settings = HashMap::new();
-        settings.insert("autobackup".to_string(), "true".to_string());
-        settings.insert("compression".to_string(), "none".to_string());
-        
-        SnapsafeConfig {
-            settings,
-        }
-    }
-}
