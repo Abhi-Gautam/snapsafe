@@ -6,87 +6,112 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  quality:
+    name: Verify release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check tag matches package version
+        shell: bash
+        run: |
+          version="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          expected="v${version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}" >&2
+            exit 1
+          fi
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-targets
+      - run: cargo package --locked
+      - uses: dtolnay/rust-toolchain@1.85
+      - run: cargo check --locked --all-targets
+
   build:
     name: Build ${{ matrix.target }}
+    needs: quality
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            cross: false
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            use-cross: true
+            cross: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            cross: false
           - os: macos-latest
             target: x86_64-apple-darwin
+            cross: false
           - os: macos-latest
             target: aarch64-apple-darwin
-
+            cross: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: ${{ matrix.target }}
-      
-      - name: Install cross
-        if: matrix.use-cross
+          targets: ${{ matrix.target }}
+      - if: matrix.cross
         uses: taiki-e/install-action@cross
-      
-      - name: Build (Linux/macOS)
-        if: matrix.os != 'windows-latest'
-        run: |
-          if [[ "${{ matrix.use-cross }}" == "true" ]]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
-      
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
-        run: cargo build --release --target ${{ matrix.target }}
-      
-      - name: Prepare artifacts
+      - name: Build
         shell: bash
         run: |
-          mkdir -p dist
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp target/${{ matrix.target }}/release/snapsafe.exe dist/
+          if [[ "${{ matrix.cross }}" == "true" ]]; then
+            cross build --release --locked --target "${{ matrix.target }}"
           else
-            cp target/${{ matrix.target }}/release/snapsafe dist/
+            cargo build --release --locked --target "${{ matrix.target }}"
           fi
-      
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Archive Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          name="snapsafe-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p "package/${name}" dist
+          cp "target/${{ matrix.target }}/release/snapsafe" "package/${name}/"
+          tar -czf "dist/${name}.tar.gz" -C package "${name}"
+      - name: Archive Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "snapsafe-$env:GITHUB_REF_NAME-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "package/$name", dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/snapsafe.exe" "package/$name/"
+          Compress-Archive -Path "package/$name" -DestinationPath "dist/$name.zip"
+      - uses: actions/upload-artifact@v7
         with:
-          name: snapsafe-${{ matrix.target }}
-          path: dist
+          name: release-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
 
   release:
-    name: Create Release
+    name: Create GitHub release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
-          path: artifacts
-      
-      - name: Display structure of downloaded files
-        run: find artifacts -type f | sort
-        
-      - name: Prepare release assets
-        run: |
-          mkdir -p release-assets
-          find artifacts -type f -name "snapsafe*" -exec cp {} release-assets/ \;
-          ls -la release-assets/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum snapsafe-* > SHA256SUMS
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
-          files: release-assets/*
           generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS

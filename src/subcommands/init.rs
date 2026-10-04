@@ -1,7 +1,7 @@
 use std::{fs, io};
 
 use crate::{
-    constants::{DEFAULT_IGNORE_ITEMS, IGNORE_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER},
+    constants::{DEFAULT_IGNORE_ITEMS, IGNORE_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER, TEMP_FOLDER},
     info, manifest,
 };
 
@@ -12,6 +12,7 @@ pub fn init_repository() -> io::Result<()> {
     let base_path = info::get_base_dir()?;
     let repo_path = base_path.join(REPO_FOLDER);
     let snapshots_path = repo_path.join(SNAPSHOTS_FOLDER);
+    let temp_path = repo_path.join(TEMP_FOLDER);
 
     if repo_path.exists() {
         println!("Repository already exists at {:?}", repo_path);
@@ -26,11 +27,15 @@ pub fn init_repository() -> io::Result<()> {
         fs::create_dir(&snapshots_path)?;
         println!("Created snapshots directory at {:?}", snapshots_path);
     }
+
+    if !temp_path.exists() {
+        fs::create_dir(&temp_path)?;
+    }
     // Create .snapsafeignore file if it doesn't exist
     let ignore_path = base_path.join(IGNORE_FILE);
     if !ignore_path.exists() {
         // Get default ignore list from config
-        let mut default_ignore_content = "# Default ignore patterns for Snap Safe\n".to_string();
+        let mut default_ignore_content = "# Default ignored names for SnapSafe\n".to_string();
         default_ignore_content
             .push_str("# Add file or directory names (one per line) to exclude from snapshots\n");
 
@@ -41,10 +46,8 @@ pub fn init_repository() -> io::Result<()> {
 
         fs::write(&ignore_path, default_ignore_content)?;
         println!("Created default {} file", IGNORE_FILE);
-        println!(
-            "You can edit this file to add patterns for files/folders to exclude from snapshots"
-        );
-        println!("Format: One filename or directory per line (similar to .gitignore)");
+        println!("You can edit this file to add file or directory names to exclude from snapshots");
+        println!("Format: one literal file or directory name per line");
     }
 
     manifest::initialize_head_manifest(&base_path)?;

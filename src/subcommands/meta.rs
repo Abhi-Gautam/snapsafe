@@ -2,6 +2,7 @@ use std::io;
 
 use crate::info;
 use crate::manifest::{load_head_manifest, save_head_manifest};
+use crate::repository::{ensure_layout, recover_transactions, RepositoryLock};
 
 /// Add, update, remove, or list custom metadata for a snapshot
 pub fn manage_metadata(
@@ -11,6 +12,10 @@ pub fn manage_metadata(
     list: bool,
 ) -> io::Result<()> {
     let base_path = info::get_base_dir()?;
+    let _lock = RepositoryLock::acquire(&base_path)?;
+    ensure_layout(&base_path)?;
+    let existing_head = load_head_manifest(&base_path)?;
+    recover_transactions(&base_path, &existing_head)?;
     let mut head_manifest = load_head_manifest(&base_path)?;
     let actual_id = info::resolve_snapshot_id(snapshot_id, &head_manifest)?;
     // Find the snapshot in the head manifest

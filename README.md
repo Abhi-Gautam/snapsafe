@@ -1,241 +1,153 @@
-# 🔍 Snap Safe
+# SnapSafe
 
-![GitHub License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Language](https://img.shields.io/badge/language-Rust-orange.svg)
-![Status](https://img.shields.io/badge/status-Active-brightgreen.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)
 
-**Snap Safe** is a lightning-fast, lightweight command-line tool for creating efficient directory snapshots. Built in Rust, it leverages hard links to provide space-efficient backups with minimal overhead — perfect for managing build artifacts, large binaries, and environments where most files remain unchanged between versions.
+SnapSafe creates local directory snapshots. It uses BLAKE3 hashes to identify file contents and hard-links verified unchanged files to reduce storage use.
 
-## ✨ Features
+## Installation
 
-- **🚀 Efficient Incremental Snapshots** - Uses hard links to avoid duplicating unchanged files, drastically reducing disk usage
-- **⚡ Blazing Fast Performance** - Written in Rust for maximum speed and minimal resource consumption
-- **💼 Metadata Management** - Attach custom metadata to snapshots, including tags and key-value properties
-- **🔄 Simple Workflow** - Designed for clarity and ease of use with an intuitive command set
-- **📊 Smart Analysis** - Built-in tools to compare, verify, and manage snapshots
-- **🔍 Version Management** - Intelligent versioning system with customizable versions
-- **🧹 Cleanup Tools** - Prune old snapshots based on age or count
-- **🏷️ Tagging System** - Organize snapshots with custom tags for easy reference
-- **⚙️ Configurable** - Adjust settings to match your workflow preferences
+With Cargo:
 
-## 📋 Table of Contents
-
-- [Installation](#-installation)
-- [Quick Start](#-quick-start)
-- [Commands Reference](#-commands-reference)
-- [Use Cases](#-use-cases)
-- [How It Works](#-how-it-works)
-- [Comparing with Other Tools](#-comparing-with-other-tools)
-- [Contributing](#-contributing)
-- [License](#-license)
-
-## 📥 Installation
-
-### From Source
-```bash
-git clone https://github.com/Abhi-Gautam/snapsafe
-cd snapsafe
-cargo build --release
-# The binary will be at target/release/snapsafe
-```
-
-### Using Cargo
 ```bash
 cargo install snapsafe
 ```
-### Download Binaries
 
-Pre-built binaries are available for download from the [GitHub releases page](https://github.com/Abhi-Gautam/snapsafe/releases). Download and add them to your path.
+Rust 1.85 or newer is required.
 
-## 🚀 Quick Start
+Prebuilt binaries and checksums are available on the [GitHub releases page](https://github.com/Abhi-Gautam/snapsafe/releases).
+
+To build from source:
 
 ```bash
-# Initialize a repository in your current directory
+git clone https://github.com/Abhi-Gautam/snapsafe.git
+cd snapsafe
+cargo build --release --locked
+```
+
+## Quick start
+
+```bash
+cd path/to/directory
 snapsafe init
+snapsafe snapshot --message "Initial state"
 
-# Create your first snapshot
-snapsafe snapshot -m "Initial snapshot"
+# Make changes, then capture another state.
+snapsafe snapshot --message "Updated assets"
 
-# Make some changes to files
-echo "new content" > example.txt
-
-# Create another snapshot 
-snapsafe snapshot -m "Added example.txt"
-
-# List all snapshots
 snapsafe list
-
-# Compare differences between snapshots
 snapsafe diff v1.0.0.0 v1.0.0.1
+snapsafe verify
+```
 
-# Restore a previous snapshot
+Restore a snapshot:
+
+```bash
 snapsafe restore v1.0.0.0
 ```
 
-## 🧰 Commands Reference
+Restore creates a backup snapshot first, verifies the source, shows the change counts, and asks for confirmation. It restores managed files, directories, supported symlinks, permissions, and modification times. Managed paths absent from the selected snapshot are removed.
 
-### Core Commands
-
-| Command | Description |
-|---------|-------------|
-| `init` | Initialize Snap Safe in the current directory |
-| `snapshot [-m MSG] [-v VERSION] [--tags TAG...] [--meta KEY VALUE]` | Create a new snapshot with optional message, version, tags, and metadata |
-| `list` | List all available snapshots |
-| `diff [SNAPSHOT1] [SNAPSHOT2]` | Show differences between snapshots |
-| `restore SNAPSHOT_ID` | Restore the working directory to a snapshot |
-
-### Management Commands
-
-| Command | Description |
-|---------|-------------|
-| `prune --keep-last N` | Keep only the N most recent snapshots |
-| `prune --older-than DURATION` | Remove snapshots older than specified duration (e.g., "7d") |
-| `prune --dry-run` | Show what would be pruned without actually deleting
-| `verify [SNAPSHOT_ID]` | Verify the integrity of snapshots |
-| `info [SNAPSHOT_ID]` | Display detailed information about a snapshot |
-
-### Metadata Commands
-
-| Command | Description |
-|---------|-------------|
-| `tag SNAPSHOT_ID --add TAGS...` | Add tags to a snapshot |
-| `tag SNAPSHOT_ID --remove TAGS...` | Remove tags from a snapshot |
-| `tag SNAPSHOT_ID --list` | List tags for a snapshot |
-| `meta SNAPSHOT_ID --set KEY VALUE` | Set custom metadata for a snapshot |
-| `meta SNAPSHOT_ID --remove KEY` | Remove custom metadata from a snapshot |
-| `meta SNAPSHOT_ID --list` | List all custom metadata for a snapshot |
-
-### Configuration
-
-| Command | Description |
-|---------|-------------|
-| `config --set KEY VALUE` | Set a configuration option |
-| `config --get KEY` | Get the value of a configuration option |
-| `config --list` | List all configuration settings |
-
-## 🎯 Use Cases
-
-### Build Artifact Management
-
-Snap Safe is ideal for CI/CD pipelines where repeated builds produce mostly unchanged artifacts:
+Preview a restore without changing files:
 
 ```bash
-# After building your project
-snapsafe snapshot -m "Build #$CI_BUILD_NUMBER" --set build_id "$CI_BUILD_NUMBER"
-
-# To restore a previous build for testing
-snapsafe restore v1.2.3.4
+snapsafe restore v1.0.0.0 --dry-run
 ```
 
-### Deployment State Management
-
-Track the state of deployed applications with version-tagged snapshots:
+Use `--yes` for confirmed non-interactive operations:
 
 ```bash
-# Before an upgrade
-snapsafe snapshot -m "Pre-upgrade state" --add pre-upgrade
-
-# After an upgrade
-snapsafe snapshot -m "Post-upgrade state" --add post-upgrade
-
-# If issues arise, compare the differences
-snapsafe diff $(snapsafe tag --list | grep pre-upgrade | cut -d' ' -f1) $(snapsafe tag --list | grep post-upgrade | cut -d' ' -f1)
+snapsafe --yes restore v1.0.0.0
+snapsafe --yes prune --keep-last 5
 ```
 
-### Large Binary Repository Management
+Without `--yes`, destructive commands reject non-interactive input.
 
-For repositories with large binary files that aren't suited for Git:
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `snapsafe init` | Initialize `.snapsafe` in the current directory |
+| `snapsafe snapshot` | Create a content-hashed snapshot |
+| `snapsafe list` | List snapshots |
+| `snapsafe diff SNAPSHOT [SNAPSHOT]` | Compare snapshots |
+| `snapsafe restore [SNAPSHOT]` | Restore a snapshot; defaults to the latest |
+| `snapsafe verify [SNAPSHOT]` | Verify manifests and stored file contents |
+| `snapsafe info [SNAPSHOT]` | Show snapshot statistics |
+| `snapsafe prune` | Remove snapshots by count or age |
+| `snapsafe tag [SNAPSHOT]` | Add, remove, or list tags |
+| `snapsafe meta [SNAPSHOT]` | Set, remove, or list metadata |
+
+Run `snapsafe COMMAND --help` for command options.
+
+## Snapshot options
 
 ```bash
-# Initialize in your asset directory
-cd assets/
-snapsafe init
-
-# After adding new assets
-snapsafe snapshot -m "Added new character models"
-
-# When you need to revert to a previous state
-snapsafe restore v1.0.0.3
+snapsafe snapshot \
+  --version 2.0.0.0 \
+  --message "Release candidate" \
+  --tags release candidate \
+  --meta build_id 12345
 ```
 
-### Configuration Management
+Versions contain one to four numeric components and are normalized to `vMAJOR.MINOR.PATCH.BUILD`.
 
-Track changes to configuration across environments:
+## Pruning
 
 ```bash
-# Store a snapshot of configuration
-snapsafe snapshot -v 1.0.0.0 -m "Production config" --add production
-snapsafe snapshot -v 1.0.0.1 -m "Staging config" --add staging
+snapsafe prune --keep-last 5 --dry-run
+snapsafe prune --older-than 30d --dry-run
 
-# View what's different between environments
-snapsafe diff v1.0.0.0 v1.0.0.1
+snapsafe --yes prune --keep-last 5
 ```
 
-## 🔧 How It Works
+Count and age criteria are mutually exclusive. Durations support `d`, `h`, `m`, and `s`.
 
-Snap Safe creates efficient snapshots through a combination of techniques:
+## Ignored names
 
-1. **Hard Links for Efficiency**:  
-   Instead of duplicating unchanged files, Snap Safe creates hard links pointing to the same data blocks on disk, drastically reducing storage requirements.
+`snapsafe init` creates `.snapsafeignore`. Each non-empty, non-comment line is a literal file or directory name ignored at every directory level. Glob and negation syntax are not supported.
 
-2. **Snapshot Manifests**:  
-   Each snapshot includes a detailed manifest tracking file metadata (paths, sizes, modification times).
+`.snapsafe` and `.snapsafeignore` are always excluded from snapshot payloads and preserved during restore.
 
-3. **Metadata Tracking**:  
-   Custom metadata and tags allow you to organize snapshots by version, environment, or any other criteria.
+## Storage and integrity
 
-4. **Specialized Diffing**:  
-   Between snapshots, Snap Safe can identify what files were added, removed, or modified.
+Repository data is stored under `.snapsafe`:
 
-4. **Integrity Verification**:  
-   Built-in verification tools ensure your snapshots maintain integrity over time.
+```text
+.snapsafe/
+├── head_manifest.json
+├── snapshots/
+│   └── v1.0.0.0/
+│       ├── manifest.json
+│       └── data/
+└── tmp/
+```
 
+Each regular file receives a streaming BLAKE3 digest. SnapSafe verifies the previous stored file before hard-linking it into a new snapshot. `verify` recalculates stored hashes and validates each snapshot manifest against the head manifest.
 
-## 📊 Comparing with Other Tools
+Snapshot creation, pruning, restore, and metadata updates use a repository lock. Snapshot and manifest writes are staged before commit, and interrupted snapshot or prune transactions are recovered on the next command.
 
-### Snap Safe vs. Git
+## Repository migration
 
-While Git is a powerful distributed version control system, Snap Safe addresses different needs:
+The first command run against a v1 repository migrates the complete repository to format v2 before continuing. Migration:
 
-| Feature | Snap Safe | Git |
-|---------|-----------|-----|
-| **Target files** | Build artifacts, large binaries | Source code, text files |
-| **Storage efficiency for binaries** | High (hard linking) | Lower (delta compression) |
-| **Learning curve** | Simple command set | Complex branching model |
-| **Workflow complexity** | Minimal | Feature-rich |
-| **Speed for large files** | Very fast | Can be slow |
+- hashes each unique hard-linked physical file once per run;
+- writes resumable prepared manifests;
+- keeps the v1 head until every snapshot is ready;
+- writes the v2 head last;
+- resumes after interruption.
 
-### Snap Safe vs. Traditional Backup Tools
+Migration establishes hashes for the bytes currently stored in v1 snapshots. Run `snapsafe verify` after migration.
 
-Compared to backup tools like rsync:
+## Contributing
 
-| Feature | Snap Safe | Traditional Backup Tools |
-|---------|-----------|--------------------------|
-| **Focus** | Version management | Data protection |
-| **Metadata** | Rich, custom metadata | Basic file attributes |
-| **Diffing capabilities** | Built-in | Limited or separate tools |
-| **Designed for** | Dev/build environments | General backup scenarios |
-| **Specialized file handling** | Yes (config files) | Typically no |
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets
+cargo package --locked
+```
 
-## 👨‍💻 Contributing
+## License
 
-Contributions are welcome! Here's how you can help:
-
-- **Report Bugs**: Open an issue describing the bug and how to reproduce it
-- **Suggest Features**: Have an idea for a new feature? Open an issue to discuss it
-- **Submit PRs**: Fix bugs or implement new features
-
-Before submitting a PR, please:
-1. Ensure your code follows the project's style
-2. Add tests for new functionality
-3. Make sure all tests pass
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-<p align="center">
-  <sub>Built with ❤️ in Rust</sub>
-</p>
+[MIT](LICENSE)

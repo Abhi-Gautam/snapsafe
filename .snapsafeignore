@@ -1,5 +1,5 @@
-# Default ignore patterns for Snap Safe
-# Add file or directory names (one per line) to exclude from snapshots
+# Default ignored names for SnapSafe
+# Add literal file or directory names, one per line
 .git
 .gitignore
 target

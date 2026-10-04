@@ -1,192 +1,387 @@
-use crate::constants::{IGNORE_FILE, MANIFEST_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER};
+use crate::constants::{DATA_FOLDER, IGNORE_FILE, REPO_FOLDER, SNAPSHOTS_FOLDER, TEMP_FOLDER};
 use crate::info;
-use crate::manifest;
-use crate::models::{FileMetadata, SnapshotIndex};
-use chrono::{DateTime, Local};
+use crate::integrity::{
+    copy_file_stable, directory_hash, hash_bytes, hash_file_stable, CapturedFile,
+};
+use crate::manifest::{self, LoadedSnapshotManifest};
+use crate::models::{FileKind, FileMetadata, SnapshotIndex, SnapshotMetadata};
+use crate::paths::{join_relative, relative_path};
+use crate::repository::{ensure_layout, recover_transactions, RepositoryLock};
+use chrono::{DateTime, SecondsFormat, Utc};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, BufRead};
-use std::path::{Path, PathBuf};
+use std::io::{self, BufRead, Write};
+use std::path::Path;
 
-/// Creates a new snapshot using the current directory as the base.
-/// The new snapshot folder name is determined by the versioning scheme (using an optional tag
-/// or auto-incrementing from the last snapshot). Files are processed recursively;
-/// if a file is unchanged compared to the previous snapshot (by size and modification time),
-/// a hard link is created instead of copying. Detailed file metadata is collected and written
-/// to a manifest file in the snapshot folder. The head manifest is updated with the new snapshot entry.
-pub fn create_snapshot(message: Option<String>, version: Option<String>) -> io::Result<()> {
+#[derive(Debug, Default)]
+pub struct SnapshotOptions {
+    pub message: Option<String>,
+    pub version: Option<String>,
+    pub tags: Vec<String>,
+    pub custom_metadata: HashMap<String, String>,
+    pub ignore: Option<Vec<String>>,
+}
+
+pub fn create_snapshot(options: SnapshotOptions) -> io::Result<String> {
     let base_path = info::get_base_dir()?;
-    let ignore_list = read_ignore_list(&base_path)?;
+    let _lock = RepositoryLock::acquire(&base_path)?;
+    create_snapshot_unlocked(options)
+}
 
+pub(crate) fn create_snapshot_unlocked(options: SnapshotOptions) -> io::Result<String> {
+    let base_path = info::get_base_dir()?;
+    ensure_layout(&base_path)?;
+    let ignore_list = match options.ignore.clone() {
+        Some(ignore) => ignore,
+        None => read_ignore_list(&base_path)?,
+    };
     let repo_path = base_path.join(REPO_FOLDER);
     let snapshots_path = repo_path.join(SNAPSHOTS_FOLDER);
+    let temp_path = repo_path.join(TEMP_FOLDER);
 
-    if !repo_path.exists() {
+    let existing_head = manifest::load_head_manifest(&base_path)?;
+    recover_transactions(&base_path, &existing_head)?;
+    let mut head_manifest = manifest::load_head_manifest(&base_path)?;
+    let new_version = info::get_next_version(&head_manifest, options.version.clone())?;
+
+    if head_manifest
+        .iter()
+        .any(|snapshot| snapshot.version == new_version)
+    {
         return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Repository not initialized. Please run the init command first.",
+            io::ErrorKind::AlreadyExists,
+            format!("snapshot {} already exists", new_version),
         ));
     }
 
-    // Load head manifest.
-    let mut head_manifest = manifest::load_head_manifest(&base_path)?;
-    // Determine new version string.
-    let new_version = info::get_next_version(&head_manifest, version.clone());
-
-    // New snapshot folder is named by the version.
     let snapshot_dir = snapshots_path.join(&new_version);
     if snapshot_dir.exists() {
-        // If a specific version was provided, return an error
-        if version.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!(
+                "snapshot directory {} already exists",
+                snapshot_dir.display()
+            ),
+        ));
+    }
+
+    let staging_dir = temp_path.join(format!(
+        "snapshot-{}-{}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    fs::create_dir(&staging_dir)?;
+    let staging_data = staging_dir.join(DATA_FOLDER);
+    fs::create_dir(&staging_data)?;
+    let staging_name = staging_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid staging path"))?;
+    let pending_path = temp_path.join(format!("snapshot-{}.pending", new_version));
+
+    if let Some(message) = &options.message {
+        println!("Snapshot message: {}", message);
+    }
+
+    let creation_result = (|| {
+        let previous = manifest::load_last_snapshot_manifest(&base_path, &head_manifest)?;
+        let mut files = Vec::new();
+        capture_directory(
+            &base_path,
+            &staging_data,
+            &base_path,
+            &ignore_list,
+            previous.as_ref(),
+            &mut files,
+        )?;
+
+        files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        let manifest_hash =
+            manifest::write_snapshot_manifest(&staging_dir, ignore_list.clone(), files)?;
+        let mut marker = fs::File::create(&pending_path)?;
+        writeln!(marker, "{}", new_version)?;
+        writeln!(marker, "{}", staging_name)?;
+        marker.sync_all()?;
+        fs::rename(&staging_dir, &snapshot_dir)?;
+
+        let metadata = if options.tags.is_empty() && options.custom_metadata.is_empty() {
+            None
+        } else {
+            Some(SnapshotMetadata {
+                tags: options.tags,
+                custom: options.custom_metadata,
+            })
+        };
+
+        head_manifest.push(SnapshotIndex {
+            version: new_version.clone(),
+            timestamp: Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true),
+            message: options.message,
+            manifest_hash,
+            metadata,
+        });
+
+        if let Err(error) = manifest::save_head_manifest(&base_path, &head_manifest) {
+            let _ = fs::remove_dir_all(&snapshot_dir);
+            return Err(error);
+        }
+        let _ = fs::remove_file(&pending_path);
+
+        Ok::<(), io::Error>(())
+    })();
+
+    if let Err(error) = creation_result {
+        let _ = fs::remove_dir_all(&staging_dir);
+        let _ = fs::remove_file(&pending_path);
+        return Err(error);
+    }
+
+    println!("Snapshot {} created successfully.", new_version);
+    Ok(new_version)
+}
+
+fn capture_directory(
+    source_dir: &Path,
+    destination_dir: &Path,
+    base_path: &Path,
+    ignore_list: &[String],
+    previous: Option<&LoadedSnapshotManifest>,
+    files: &mut Vec<FileMetadata>,
+) -> io::Result<()> {
+    for entry in fs::read_dir(source_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 path"))?;
+
+        if file_name == REPO_FOLDER
+            || file_name == IGNORE_FILE
+            || ignore_list.iter().any(|item| item == &file_name)
+        {
+            continue;
+        }
+
+        let destination_path = destination_dir.join(&file_name);
+        let file_type = entry.file_type()?;
+
+        if file_type.is_dir() {
+            fs::create_dir(&destination_path)?;
+            let directory_metadata = capture_directory_metadata(base_path, &path)?;
+            capture_directory(
+                &path,
+                &destination_path,
+                base_path,
+                ignore_list,
+                previous,
+                files,
+            )?;
+            files.push(directory_metadata);
+        } else if file_type.is_file() {
+            let relative_path = relative_path(base_path, &path)?;
+
+            let previous_file = previous.and_then(|manifest| manifest.files.get(&relative_path));
+            let captured = capture_file(
+                &path,
+                &destination_path,
+                &relative_path,
+                previous,
+                previous_file,
+            )?;
+
+            protect_snapshot_file(&destination_path)?;
+            files.push(FileMetadata {
+                relative_path,
+                file_size: captured.size,
+                modified: captured.modified,
+                kind: FileKind::File,
+                content_hash: captured.content_hash,
+                link_target: None,
+                unix_mode: unix_mode(&path)?,
+            });
+        } else if file_type.is_symlink() {
+            files.push(capture_symlink(base_path, &path)?);
+        } else {
             return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!(
-                    "A snapshot with version {} already exists. Please choose a different version.",
-                    new_version
-                ),
+                io::ErrorKind::Unsupported,
+                format!("unsupported filesystem entry: {}", path.display()),
             ));
         }
     }
-    fs::create_dir(&snapshot_dir)?;
 
-    if let Some(ref msg) = message {
-        println!("Snapshot message: {}", msg);
+    Ok(())
+}
+
+fn capture_directory_metadata(base_path: &Path, path: &Path) -> io::Result<FileMetadata> {
+    let metadata = fs::symlink_metadata(path)?;
+    let modified: DateTime<Utc> = metadata.modified()?.into();
+    Ok(FileMetadata {
+        relative_path: relative_path(base_path, path)?,
+        file_size: 0,
+        modified: modified.to_rfc3339_opts(SecondsFormat::Nanos, true),
+        kind: FileKind::Directory,
+        content_hash: directory_hash(),
+        link_target: None,
+        unix_mode: unix_mode(path)?,
+    })
+}
+
+fn capture_symlink(base_path: &Path, path: &Path) -> io::Result<FileMetadata> {
+    for _ in 0..2 {
+        let before = fs::symlink_metadata(path)?;
+        let target = fs::read_link(path)?;
+        let target_text = target
+            .to_str()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 symlink target"))?
+            .to_string();
+        let kind = classify_symlink(path);
+        validate_symlink_kind(kind, path)?;
+        let after = fs::symlink_metadata(path)?;
+
+        if before.modified()? == after.modified()?
+            && before.len() == after.len()
+            && fs::read_link(path)? == target
+        {
+            let modified: DateTime<Utc> = after.modified()?.into();
+            return Ok(FileMetadata {
+                relative_path: relative_path(base_path, path)?,
+                file_size: target_text.len() as u64,
+                modified: modified.to_rfc3339_opts(SecondsFormat::Nanos, true),
+                kind,
+                content_hash: hash_bytes(target_text.as_bytes()),
+                link_target: Some(target_text),
+                unix_mode: None,
+            });
+        }
     }
 
-    // Load previous snapshot manifest (if any) using the head manifest.
-    let prev_snapshot = manifest::load_last_snapshot_manifest(&base_path, &head_manifest)?;
+    Err(io::Error::other(format!(
+        "symlink changed repeatedly while being captured: {}",
+        path.display()
+    )))
+}
 
-    // Prepare vector to collect detailed file metadata.
-    let mut metadata_vec: Vec<FileMetadata> = Vec::new();
-    copy_or_link_recursive_with_metadata(
-        &base_path,
-        &snapshot_dir,
-        REPO_FOLDER,
-        &base_path,
-        &ignore_list,
-        &prev_snapshot,
-        &mut metadata_vec,
-    )?;
+#[cfg(unix)]
+fn classify_symlink(_path: &Path) -> FileKind {
+    FileKind::SymlinkUnknown
+}
 
-    // Write the detailed manifest into the snapshot folder.
-    let manifest_path = snapshot_dir.join(MANIFEST_FILE);
-    let manifest_json = serde_json::to_string_pretty(&metadata_vec)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    fs::write(&manifest_path, manifest_json)?;
+#[cfg(unix)]
+fn validate_symlink_kind(_kind: FileKind, _path: &Path) -> io::Result<()> {
+    Ok(())
+}
 
-    // Create a new snapshot index entry.
-    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let new_snapshot_index = SnapshotIndex {
-        version: new_version.clone(),
-        timestamp,
-        message,
-        metadata: None,
+#[cfg(windows)]
+fn validate_symlink_kind(kind: FileKind, path: &Path) -> io::Result<()> {
+    if kind == FileKind::SymlinkUnknown {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "cannot snapshot a symlink with an unknown target type on Windows: {}",
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn classify_symlink(path: &Path) -> FileKind {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => FileKind::SymlinkDirectory,
+        Ok(_) => FileKind::SymlinkFile,
+        Err(_) => FileKind::SymlinkUnknown,
+    }
+}
+
+fn capture_file(
+    source_path: &Path,
+    destination_path: &Path,
+    relative_path: &str,
+    previous: Option<&LoadedSnapshotManifest>,
+    previous_file: Option<&FileMetadata>,
+) -> io::Result<CapturedFile> {
+    let Some(previous_file) = previous_file else {
+        return copy_file_stable(source_path, destination_path);
     };
 
-    // Update the head manifest.
-    head_manifest.push(new_snapshot_index);
-    manifest::save_head_manifest(&base_path, &head_manifest)?;
+    for _ in 0..2 {
+        let current = hash_file_stable(source_path)?;
+        if current.content_hash == previous_file.content_hash {
+            if let Some(previous) = previous {
+                let previous_path = join_relative(&previous.data_folder, relative_path)?;
+                let previous_is_valid = fs::symlink_metadata(&previous_path)
+                    .map(|metadata| metadata.file_type().is_file())
+                    .unwrap_or(false)
+                    && hash_file_stable(&previous_path)
+                        .map(|captured| captured.content_hash == previous_file.content_hash)
+                        .unwrap_or(false);
 
-    println!("Snapshot created successfully.");
-    Ok(())
-}
-
-/// Reads the ignore list from the .snapsafeignore file in the base directory.
-/// Each non-empty, non-comment line is treated as a literal file or directory name to ignore.
-fn read_ignore_list(base: &Path) -> io::Result<Vec<String>> {
-    let ignore_path = base.join(IGNORE_FILE);
-    let mut ignore_list = Vec::new();
-
-    if ignore_path.exists() {
-        let file = fs::File::open(ignore_path)?;
-        let reader = io::BufReader::new(file);
-        for line_result in reader.lines() {
-            let line = line_result?;
-            let trimmed = line.trim();
-            if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                ignore_list.push(trimmed.to_string());
-            }
-        }
-    }
-    Ok(ignore_list)
-}
-
-/// Recursively processes files and directories from src to dst, skipping entries that match skip_dir
-/// or appear in ignore_list. For each file, if a previous snapshot exists and the file is unchanged
-/// (based on size and modification time), an attempt is made to create a hard link from the previous
-/// snapshot's file; otherwise, the file is copied. Collected file metadata is appended to the metadata vector.
-fn copy_or_link_recursive_with_metadata(
-    src: &Path,
-    dst: &Path,
-    skip_dir: &str,
-    base: &Path,
-    ignore_list: &Vec<String>,
-    prev_snapshot: &Option<(PathBuf, HashMap<String, FileMetadata>)>,
-    metadata: &mut Vec<FileMetadata>,
-) -> io::Result<()> {
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let path = entry.path();
-        let file_name = entry.file_name();
-        let file_name_str = file_name.to_string_lossy();
-
-        // Skip the repository folder and entries in the ignore list.
-        if file_name_str == skip_dir {
-            continue;
-        }
-        if ignore_list.contains(&file_name_str.to_string()) {
-            continue;
-        }
-
-        let dest_path = dst.join(&file_name);
-
-        if path.is_dir() {
-            fs::create_dir_all(&dest_path)?;
-            copy_or_link_recursive_with_metadata(
-                &path,
-                &dest_path,
-                skip_dir,
-                base,
-                ignore_list,
-                prev_snapshot,
-                metadata,
-            )?;
-        } else if path.is_file() {
-            let meta = fs::metadata(&path)?;
-            let file_size = meta.len();
-            let modified_time: DateTime<Local> = meta
-                .modified()
-                .map(DateTime::<Local>::from)
-                .unwrap_or_else(|_| Local::now());
-            let modified_str = modified_time.format("%Y-%m-%d %H:%M:%S").to_string();
-            let relative_path = path
-                .strip_prefix(base)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .to_string();
-
-            let file_meta = FileMetadata {
-                relative_path: relative_path.clone(),
-                file_size,
-                modified: modified_str.clone(),
-            };
-
-            let mut used_hard_link = false;
-            if let Some((prev_snapshot_dir, prev_manifest)) = prev_snapshot {
-                if let Some(prev_meta) = prev_manifest.get(&relative_path) {
-                    if prev_meta.file_size == file_size && prev_meta.modified == modified_str {
-                        let prev_file_path = prev_snapshot_dir.join(&relative_path);
-                        if fs::hard_link(&prev_file_path, &dest_path).is_ok() {
-                            used_hard_link = true;
-                        }
-                    }
+                if previous_is_valid && fs::hard_link(previous_path, destination_path).is_ok() {
+                    return Ok(current);
                 }
             }
-            if !used_hard_link {
-                fs::copy(&path, &dest_path)?;
-            }
-            metadata.push(file_meta);
+        }
+
+        let copied = copy_file_stable(source_path, destination_path)?;
+        if copied.content_hash == current.content_hash {
+            return Ok(copied);
+        }
+
+        let _ = fs::remove_file(destination_path);
+    }
+
+    Err(io::Error::other(format!(
+        "file changed repeatedly while being captured: {}",
+        source_path.display()
+    )))
+}
+
+#[cfg(unix)]
+fn unix_mode(path: &Path) -> io::Result<Option<u32>> {
+    use std::os::unix::fs::PermissionsExt;
+    Ok(Some(fs::metadata(path)?.permissions().mode()))
+}
+
+#[cfg(not(unix))]
+fn unix_mode(_path: &Path) -> io::Result<Option<u32>> {
+    Ok(None)
+}
+
+#[cfg(unix)]
+fn protect_snapshot_file(path: &Path) -> io::Result<()> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(path, permissions)
+}
+
+#[cfg(windows)]
+fn protect_snapshot_file(path: &Path) -> io::Result<()> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(path, permissions)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn protect_snapshot_file(_path: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+fn read_ignore_list(base_path: &Path) -> io::Result<Vec<String>> {
+    let ignore_path = base_path.join(IGNORE_FILE);
+    if !ignore_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let reader = io::BufReader::new(fs::File::open(ignore_path)?);
+    let mut items = Vec::new();
+    for line in reader.lines() {
+        let line = line?;
+        let line = line.trim();
+        if !line.is_empty() && !line.starts_with('#') {
+            items.push(line.to_string());
         }
     }
-    Ok(())
+    Ok(items)
 }

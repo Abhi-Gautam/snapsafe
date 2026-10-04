@@ -24,17 +24,10 @@ pub fn show_snapshot_info(snapshot_id: Option<String>) -> io::Result<()> {
             )
         })?;
 
-    // Load the snapshot manifest
-    let snap_option = manifest::load_snapshot_manifest(&base_path, &snapshot.version)?;
-    let (_snapshot_dir, manifest) = snap_option.ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Manifest for snapshot {} not found", actual_id),
-        )
-    })?;
+    let loaded = manifest::load_snapshot_manifest(&base_path, &snapshot.version)?;
+    manifest::validate_loaded_manifest(&loaded, &head_manifest, &snapshot.version)?;
 
-    // Calculate statistics
-    let stats = calculate_snapshot_stats(&manifest);
+    let stats = calculate_snapshot_stats(&loaded.files);
 
     // Display the information
     println!("Snapshot Information");
@@ -64,7 +57,7 @@ pub fn show_snapshot_info(snapshot_id: Option<String>) -> io::Result<()> {
     println!("File Types");
     println!("==========");
     let mut file_types: Vec<(String, usize)> = stats.file_types.into_iter().collect();
-    file_types.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by count (descending)
+    file_types.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
     for (ext, count) in file_types.iter().take(10) {
         // Show top 10

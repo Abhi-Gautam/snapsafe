@@ -1,23 +1,31 @@
 [package]
 name = "snapsafe"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+rust-version = "1.85"
 authors = ["Abhishek Gautam <abhishekgautam011@gmail.com>"]
-description = "A lightning-fast, lightweight command-line tool for creating efficient directory snapshots"
+description = "A command-line tool for space-efficient local directory snapshots"
 readme = "README.md"
 repository = "https://github.com/Abhi-Gautam/snapsafe"
 license = "MIT"
 keywords = ["backup", "snapshot", "filesystem", "cli"]
 categories = ["command-line-utilities", "filesystem"]
+exclude = [".github/**", ".gitignore", ".snapsafeignore", "docs/**"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-dirs = "5.0"
+blake3 = "1.8"
+fs2 = "0.4"
+filetime = "0.2"
+same-file = "1.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
-predicates = "2.0"
+predicates = "3.1"
 tempfile = "3.3"

@@ -12,17 +12,20 @@
 //!
 
 use clap::{Parser, Subcommand};
+use snapsafe::migration;
+use snapsafe::subcommands;
+use snapsafe::subcommands::snapshot::SnapshotOptions;
+use std::collections::HashMap;
 use std::process;
-mod constants;
-mod info;
-mod manifest;
-mod models;
-mod subcommands;
 
 #[derive(Parser)]
-#[command(name = "snapsafe")]
-#[command(about = "Snap Safe: A CLI tool for efficient snapshots management", long_about = None)]
+#[command(name = "snapsafe", version)]
+#[command(about = "Space-efficient local directory snapshots", long_about = None)]
 struct Cli {
+    /// Skip confirmation prompts for destructive commands
+    #[arg(short = 'y', long, global = true)]
+    yes: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -101,6 +104,10 @@ enum Commands {
         /// Note: Without a backup, you can't easily undo the restoration
         #[arg(long, action = clap::ArgAction::SetTrue)]
         no_backup: bool,
+
+        /// Show the restore plan without changing files
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Remove old snapshots based on specified criteria
     ///
@@ -114,12 +121,12 @@ enum Commands {
     ///   snapsafe prune --older-than 30d --dry-run
     Prune {
         /// Keep only the N most recent snapshots and remove older ones
-        #[arg(long)]
+        #[arg(long, conflicts_with = "older_than")]
         keep_last: Option<usize>,
 
         /// Remove snapshots older than the specified duration
         /// Supports formats: "7d" (days), "24h" (hours), "30m" (minutes), "60s" (seconds)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "keep_last")]
         older_than: Option<String>,
 
         /// Simulate pruning without actually deleting snapshots
@@ -170,15 +177,15 @@ enum Commands {
         snapshot_id: Option<String>,
 
         /// Add one or more tags to the snapshot
-        #[arg(short, long, num_args = 1..)]
+        #[arg(short, long, num_args = 1.., conflicts_with_all = ["remove", "list"])]
         add: Option<Vec<String>>,
 
         /// Remove one or more tags from the snapshot
-        #[arg(short, long, num_args = 1..)]
+        #[arg(short, long, num_args = 1.., conflicts_with_all = ["add", "list"])]
         remove: Option<Vec<String>>,
 
         /// List all tags for the snapshot (default if no other options provided)
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with_all = ["add", "remove"])]
         list: bool,
     },
 
@@ -197,21 +204,28 @@ enum Commands {
         snapshot_id: Option<String>,
 
         /// Set a metadata key and value
-        #[arg(short, long, num_args = 2)]
+        #[arg(short, long, num_args = 2, conflicts_with_all = ["remove", "list"])]
         set: Option<Vec<String>>,
 
         /// Remove a metadata key and its associated value
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with_all = ["set", "list"])]
         remove: Option<String>,
 
         /// List all metadata for the snapshot (default if no other options provided)
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with_all = ["set", "remove"])]
         list: bool,
     },
 }
 
 fn main() {
     let cli = Cli::parse();
+
+    if !matches!(&cli.command, Commands::Init) {
+        if let Err(error) = migration::prepare_current_repository() {
+            eprintln!("Error preparing repository: {}", error);
+            process::exit(1);
+        }
+    }
 
     match &cli.command {
         Commands::Init => {
@@ -226,46 +240,22 @@ fn main() {
             tags,
             meta,
         } => {
-            // Create the snapshot first
-            if let Err(e) = subcommands::snapshot::create_snapshot(message.clone(), version.clone())
-            {
-                eprintln!("Error creating snapshot: {}", e);
-                process::exit(1);
+            let mut custom_metadata = HashMap::new();
+            if let Some(values) = meta {
+                custom_metadata.insert(values[0].clone(), values[1].clone());
             }
 
-            // Get the created snapshot version (likely the latest one)
-            let base_path = info::get_base_dir().unwrap();
-            let head_manifest = manifest::load_head_manifest(&base_path).unwrap();
-            if let Some(last_snapshot) = head_manifest.last() {
-                let snapshot_id = last_snapshot.version.clone();
+            let options = SnapshotOptions {
+                message: message.clone(),
+                version: version.clone(),
+                tags: tags.clone().unwrap_or_default(),
+                custom_metadata,
+                ignore: None,
+            };
 
-                // Add tags if provided
-                if let Some(tag_list) = tags {
-                    if let Err(e) = subcommands::tag::manage_tags(
-                        Some(snapshot_id.clone()),
-                        Some(tag_list.to_vec()),
-                        None,
-                        false,
-                    ) {
-                        eprintln!("Error adding tags: {}", e);
-                    }
-                }
-
-                // Add metadata if provided
-                if let Some(metadata) = meta {
-                    if metadata.len() == 2 {
-                        if let Err(e) = subcommands::meta::manage_metadata(
-                            Some(snapshot_id.clone()),
-                            Some(metadata.to_vec()),
-                            None,
-                            false,
-                        ) {
-                            eprintln!("Error adding metadata: {}", e);
-                        }
-                    } else {
-                        eprintln!("Error: Please provide exactly two values for --meta: a key and a value.");
-                    }
-                }
+            if let Err(error) = subcommands::snapshot::create_snapshot(options) {
+                eprintln!("Error creating snapshot: {}", error);
+                process::exit(1);
             }
         }
         Commands::List => {
@@ -287,9 +277,15 @@ fn main() {
         Commands::Restore {
             snapshot_id,
             no_backup,
+            dry_run,
         } => {
-            let backup = !no_backup; // Invert the flag since we want backup by default
-            if let Err(e) = subcommands::restore::restore_snapshot(snapshot_id.clone(), backup) {
+            let backup = !no_backup;
+            if let Err(e) = subcommands::restore::restore_snapshot(
+                snapshot_id.clone(),
+                backup,
+                *dry_run,
+                cli.yes,
+            ) {
                 eprintln!("Error restoring snapshot: {}", e);
                 process::exit(1);
             }
@@ -299,9 +295,12 @@ fn main() {
             older_than,
             dry_run,
         } => {
-            if let Err(e) =
-                subcommands::prune::prune_snapshots(*keep_last, older_than.clone(), *dry_run)
-            {
+            if let Err(e) = subcommands::prune::prune_snapshots(
+                *keep_last,
+                older_than.clone(),
+                *dry_run,
+                cli.yes,
+            ) {
                 eprintln!("Error pruning snapshots: {}", e);
                 process::exit(1);
             }

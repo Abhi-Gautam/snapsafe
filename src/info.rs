@@ -1,79 +1,42 @@
 use crate::models::SnapshotIndex;
+use crate::paths::validate_snapshot_id;
+use std::fmt;
 use std::io;
 use std::path::PathBuf;
+use std::str::FromStr;
 
-/// Returns the base directory (current working directory).
 pub fn get_base_dir() -> io::Result<PathBuf> {
     std::env::current_dir()
 }
 
-/// Given the current head manifest and an optional user-provided version,
-/// returns the next snapshot version string.
-pub fn get_next_version(head: &[SnapshotIndex], version: Option<String>) -> String {
-    if let Some(user_version) = version {
-        // Handle different version input formats
-        // If it's already a full version with a "v" prefix, use it directly
-        if user_version.starts_with('v') && user_version.matches('.').count() == 3 {
-            // Check if this version already exists
-            if head.iter().any(|s| s.version == user_version) {
-                // Version exists, increment the build number
-                let parts: Vec<&str> = user_version.trim_start_matches('v').split('.').collect();
-                let major = parts[0];
-                let minor = parts[1];
-                let patch = parts[2];
-                let build: u32 = parts[3].parse().unwrap_or(0);
-                let new_build = build + 1;
-                format!("v{}.{}.{}.{}", major, minor, patch, new_build)
-            } else {
-                user_version
-            }
+pub fn get_next_version(head: &[SnapshotIndex], requested: Option<String>) -> io::Result<String> {
+    if let Some(requested) = requested {
+        let version = SnapshotVersion::from_str(&requested)?.to_string();
+        if head.iter().any(|snapshot| snapshot.version == version) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("snapshot {} already exists", version),
+            ));
         }
-        // If it's a simple number like "1" or "2"
-        else if user_version.chars().all(|c| c.is_ascii_digit()) {
-            format!("v{}.0.0.0", user_version)
-        }
-        // If it's a partial version like "1.2" or "2.3.1"
-        else {
-            let trimmed = user_version.trim_start_matches('v');
-            let parts: Vec<&str> = trimmed.split('.').collect();
+        return Ok(version);
+    }
 
-            match parts.len() {
-                1 => format!("v{}.0.0.0", parts[0]),
-                2 => format!("v{}.{}.0.0", parts[0], parts[1]),
-                3 => format!("v{}.{}.{}.0", parts[0], parts[1], parts[2]),
-                4 => format!("v{}.{}.{}.{}", parts[0], parts[1], parts[2], parts[3]),
-                _ => "v1.0.0.0".to_string(), // Fallback for unexpected formats
-            }
-        }
-    } else {
-        // No version provided, use the auto-incrementing logic
-        if head.is_empty() {
-            "v1.0.0.0".to_string()
-        } else {
-            let last_version = &head.last().unwrap().version;
-            // Assume the version is in the format vX.Y.Z.B
-            let numeric_part = last_version.trim_start_matches('v');
-            let parts: Vec<&str> = numeric_part.split('.').collect();
-            if parts.len() != 4 {
-                // Fallback if not in expected format
-                "v1.0.0.0".to_string()
-            } else {
-                let major = parts[0];
-                let minor = parts[1];
-                let patch = parts[2];
-                let build: u32 = parts[3].parse().unwrap_or(0);
-                let new_build = build + 1;
-                format!("v{}.{}.{}.{}", major, minor, patch, new_build)
-            }
+    if head.is_empty() {
+        return Ok(SnapshotVersion([1, 0, 0, 0]).to_string());
+    }
+
+    let mut version = SnapshotVersion::from_str(&head.last().unwrap().version)?;
+    loop {
+        version.0[3] = version.0[3].checked_add(1).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "snapshot version overflow")
+        })?;
+        let candidate = version.to_string();
+        if !head.iter().any(|snapshot| snapshot.version == candidate) {
+            return Ok(candidate);
         }
     }
 }
 
-/// Resolves a snapshot ID, with support for:
-/// - None (returns the latest snapshot)
-/// - "latest" (returns the latest snapshot)
-/// - Exact version match
-/// - Prefix version match
 pub fn resolve_snapshot_id(
     snapshot_id: Option<String>,
     head_manifest: &[SnapshotIndex],
@@ -81,41 +44,129 @@ pub fn resolve_snapshot_id(
     if head_manifest.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "No snapshots available.",
+            "no snapshots available",
         ));
     }
 
-    match snapshot_id {
-        None => {
-            // If no ID provided, use the latest snapshot
-            Ok(head_manifest.last().unwrap().version.clone())
-        }
-        Some(id) => {
-            // Check if the ID is "latest"
-            if id.to_lowercase() == "latest" {
-                Ok(head_manifest.last().unwrap().version.clone())
-            } else {
-                // Try exact match first
-                let exact_match = head_manifest
-                    .iter()
-                    .find(|s| s.version == id)
-                    .map(|s| s.version.clone());
+    let Some(id) = snapshot_id else {
+        return Ok(head_manifest.last().unwrap().version.clone());
+    };
 
-                // If no exact match, try prefix match
-                match exact_match {
-                    Some(v) => Ok(v),
-                    None => head_manifest
-                        .iter()
-                        .find(|s| s.version.starts_with(&id))
-                        .map(|s| s.version.clone())
-                        .ok_or_else(|| {
-                            io::Error::new(
-                                io::ErrorKind::NotFound,
-                                format!("Snapshot {} not found", id),
-                            )
-                        }),
-                }
-            }
+    if id.eq_ignore_ascii_case("latest") {
+        return Ok(head_manifest.last().unwrap().version.clone());
+    }
+
+    validate_snapshot_id(&id)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+
+    if let Some(snapshot) = head_manifest.iter().find(|snapshot| snapshot.version == id) {
+        return Ok(snapshot.version.clone());
+    }
+
+    let matches: Vec<&SnapshotIndex> = head_manifest
+        .iter()
+        .filter(|snapshot| snapshot.version.starts_with(&id))
+        .collect();
+
+    match matches.as_slice() {
+        [] => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("snapshot {} not found", id),
+        )),
+        [snapshot] => Ok(snapshot.version.clone()),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("snapshot prefix {} is ambiguous", id),
+        )),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SnapshotVersion([u32; 4]);
+
+impl FromStr for SnapshotVersion {
+    type Err = io::Error;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let value = input.strip_prefix('v').unwrap_or(input);
+        let parts: Vec<&str> = value.split('.').collect();
+        if parts.is_empty() || parts.len() > 4 || parts.iter().any(|part| part.is_empty()) {
+            return Err(invalid_version(input));
         }
+
+        let mut version = [0; 4];
+        for (index, part) in parts.iter().enumerate() {
+            if !part.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(invalid_version(input));
+            }
+            version[index] = part.parse().map_err(|_| invalid_version(input))?;
+        }
+
+        Ok(Self(version))
+    }
+}
+
+impl fmt::Display for SnapshotVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "v{}.{}.{}.{}",
+            self.0[0], self.0[1], self.0[2], self.0[3]
+        )
+    }
+}
+
+fn invalid_version(version: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("invalid snapshot version: {}", version),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{get_next_version, resolve_snapshot_id, SnapshotVersion};
+    use crate::models::{ContentHash, SnapshotIndex};
+    use std::str::FromStr;
+
+    fn snapshot(version: &str) -> SnapshotIndex {
+        SnapshotIndex {
+            version: version.to_string(),
+            timestamp: String::new(),
+            message: None,
+            manifest_hash: ContentHash::blake3("0".repeat(64)),
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn normalizes_versions() {
+        assert_eq!(
+            SnapshotVersion::from_str("2").unwrap().to_string(),
+            "v2.0.0.0"
+        );
+        assert_eq!(
+            SnapshotVersion::from_str("v2.3.4").unwrap().to_string(),
+            "v2.3.4.0"
+        );
+        assert!(SnapshotVersion::from_str("release").is_err());
+        assert!(SnapshotVersion::from_str("").is_err());
+    }
+
+    #[test]
+    fn generates_unused_versions() {
+        let head = vec![snapshot("v1.0.0.0"), snapshot("v1.0.0.1")];
+        assert_eq!(get_next_version(&head, None).unwrap(), "v1.0.0.2");
+        assert!(get_next_version(&head, Some("1".to_string())).is_err());
+    }
+
+    #[test]
+    fn rejects_ambiguous_prefixes() {
+        let head = vec![snapshot("v1.0.0.0"), snapshot("v1.0.0.1")];
+        assert!(resolve_snapshot_id(Some("v1".to_string()), &head).is_err());
+        assert_eq!(
+            resolve_snapshot_id(Some("v1.0.0.1".to_string()), &head).unwrap(),
+            "v1.0.0.1"
+        );
     }
 }

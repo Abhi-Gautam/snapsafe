@@ -1,116 +1,71 @@
+use crate::info;
+use crate::manifest::{self, load_head_manifest};
 use std::io;
 
-use crate::{
-    info::get_base_dir,
-    manifest::{self, load_head_manifest},
-};
+pub fn diff_snapshots(snapshot1: String, snapshot2: Option<String>) -> io::Result<()> {
+    let base_path = info::get_base_dir()?;
+    let head_manifest = load_head_manifest(&base_path)?;
+    let version1 = info::resolve_snapshot_id(Some(snapshot1), &head_manifest)?;
+    let version2 = info::resolve_snapshot_id(snapshot2, &head_manifest)?;
 
-/// Diffs two snapshots identified by their version strings.
-/// It prints the added, removed, and updated files in tabular form.
-/// Only files that have differences (or are new/removed) are shown.
-pub fn diff_snapshots(version1: String, version2: Option<String>) -> io::Result<()> {
-    let (v1, v2) = get_snapshots_to_diff(version1, version2)?;
-    let base_path = get_base_dir()?;
+    let manifest1 = manifest::load_snapshot_manifest(&base_path, &version1)?;
+    let manifest2 = manifest::load_snapshot_manifest(&base_path, &version2)?;
+    manifest::validate_loaded_manifest(&manifest1, &head_manifest, &version1)?;
+    manifest::validate_loaded_manifest(&manifest2, &head_manifest, &version2)?;
 
-    // Load the detailed manifest for snapshot v1.
-    let snap1_option = manifest::load_snapshot_manifest(&base_path, &v1)?;
-    // Load the detailed manifest for snapshot v2.
-    let snap2_option = manifest::load_snapshot_manifest(&base_path, &v2)?;
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut updated = Vec::new();
 
-    // If either manifest is missing, return an error.
-    let (_, manifest1) = snap1_option.ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Manifest for snapshot {} not found", v1),
-        )
-    })?;
-    let (_, manifest2) = snap2_option.ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Manifest for snapshot {} not found", v2),
-        )
-    })?;
-    // Determine added files: present in manifest2 but not in manifest1.
-    let mut added: Vec<String> = Vec::new();
-    // Determine removed files: present in manifest1 but not in manifest2.
-    let mut removed: Vec<String> = Vec::new();
-    // Determine updated files: present in both but with differences.
-    let mut updated: Vec<String> = Vec::new();
-
-    for (path, meta2) in &manifest2 {
-        match manifest1.get(path.as_str()) {
-            Some(meta1) => {
-                if meta1.file_size != meta2.file_size || meta1.modified != meta2.modified {
-                    updated.push(path.clone());
-                }
+    for (path, second) in &manifest2.files {
+        match manifest1.files.get(path) {
+            Some(first)
+                if first.kind != second.kind
+                    || first.content_hash != second.content_hash
+                    || first.link_target != second.link_target
+                    || first.unix_mode != second.unix_mode
+                    || first.modified != second.modified =>
+            {
+                updated.push(path.clone())
             }
-            None => {
-                added.push(path.clone());
-            }
+            None => added.push(path.clone()),
+            _ => {}
         }
     }
-    for path in manifest1.keys() {
-        if !manifest2.contains_key(path) {
+
+    for path in manifest1.files.keys() {
+        if !manifest2.files.contains_key(path) {
             removed.push(path.clone());
         }
     }
 
-    // Print the diff in tabular form.
-    if !added.is_empty() {
-        println!("Added Files:");
-        println!("{:-<50}", "");
-        for file in &added {
-            println!("{}", file);
-        }
-        println!();
-    }
+    added.sort();
+    removed.sort();
+    updated.sort();
 
-    if !removed.is_empty() {
-        println!("Removed Files:");
-        println!("{:-<50}", "");
-        for file in &removed {
-            println!("{}", file);
-        }
-        println!();
-    }
-
-    if !updated.is_empty() {
-        println!("Updated Files:");
-        println!("{:-<50}", "");
-        for file in &updated {
-            println!("{}", file);
-        }
-        println!();
-    }
+    print_section("Added Files", &added);
+    print_section("Removed Files", &removed);
+    print_section("Updated Files", &updated);
 
     if added.is_empty() && removed.is_empty() && updated.is_empty() {
-        println!("No differences found between snapshots {} and {}.", v1, v2);
+        println!(
+            "No differences found between snapshots {} and {}.",
+            version1, version2
+        );
     }
 
     Ok(())
 }
 
-/// Given a required snapshot version (version1) and an optional snapshot version (version2),
-/// returns a tuple of snapshot versions to compare. If version2 is not provided,
-/// it retrieves the latest snapshot version from the head manifest.
-fn get_snapshots_to_diff(
-    version1: String,
-    version2: Option<String>,
-) -> io::Result<(String, String)> {
-    let base_path = get_base_dir()?;
-    let head_manifest = load_head_manifest(&base_path)?;
-    let v2 = match version2 {
-        Some(v) => v,
-        None => {
-            if head_manifest.is_empty() {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "No snapshots available for diff.",
-                ));
-            } else {
-                head_manifest.last().unwrap().version.clone()
-            }
-        }
-    };
-    Ok((version1, v2))
+fn print_section(title: &str, files: &[String]) {
+    if files.is_empty() {
+        return;
+    }
+
+    println!("{}:", title);
+    println!("{:-<50}", "");
+    for file in files {
+        println!("{}", file);
+    }
+    println!();
 }

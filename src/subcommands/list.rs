@@ -36,12 +36,13 @@ pub fn list_snapshots() -> io::Result<()> {
                 if metadata.custom.is_empty() {
                     "-".to_string()
                 } else {
-                    metadata
+                    let mut entries: Vec<String> = metadata
                         .custom
                         .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<String>>()
-                        .join(", ")
+                        .map(|(key, value)| format!("{}={}", key, value))
+                        .collect();
+                    entries.sort();
+                    entries.join(", ")
                 }
             } else {
                 "-".to_string()
@@ -51,23 +52,21 @@ pub fn list_snapshots() -> io::Result<()> {
                 "{:<10} {:<20} {:<20} {:<20} {:<30}",
                 snapshot.version,
                 snapshot.timestamp,
-                if msg.len() > 17 {
-                    format!("{}...", &msg[..17])
-                } else {
-                    msg
-                },
-                if tags.len() > 17 {
-                    format!("{}...", &tags[..17])
-                } else {
-                    tags
-                },
-                if meta_str.len() > 27 {
-                    format!("{}...", &meta_str[..27])
-                } else {
-                    meta_str
-                }
+                truncate(&msg, 17),
+                truncate(&tags, 17),
+                truncate(&meta_str, 27)
             );
         }
     }
     Ok(())
+}
+
+fn truncate(value: &str, maximum_characters: usize) -> String {
+    let mut characters = value.chars();
+    let prefix: String = characters.by_ref().take(maximum_characters).collect();
+    if characters.next().is_some() {
+        format!("{}...", prefix)
+    } else {
+        prefix
+    }
 }
